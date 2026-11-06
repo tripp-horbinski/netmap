@@ -48,6 +48,9 @@ window.nm = (() => {
   const appInfo = (p) => apps.get(p) ?? null;
   function appName(p) {
     if (!p) return p;
+    // netlog tags browsers it saw started headless or under automation: "… [headless]" -> "Chrome (headless)".
+    const kind = /^(.*) \[(headless|automated)\]$/.exec(p);
+    if (kind) return `${appName(kind[1])} (${kind[2]})`;
     for (const [re, name] of APP_ALIAS) if (re.test(p)) return name; // one name per product, whatever the helper
     const a = apps.get(p);
     if (a?.name) return a.version && p === a.version ? `${a.name} ${a.version}` : a.name; // "Claude Code 2.1.319": the binary is named by its version

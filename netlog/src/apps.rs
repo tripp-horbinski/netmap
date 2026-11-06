@@ -10,6 +10,52 @@ use std::path::Path;
 unsafe extern "C" {
     fn proc_pidpath(pid: i32, buffer: *mut c_char, buffersize: u32) -> i32;
     fn proc_pidinfo(pid: i32, flavor: i32, arg: u64, buffer: *mut u8, buffersize: i32) -> i32;
+    fn sysctl(name: *const i32, namelen: u32, oldp: *mut u8, oldlenp: *mut usize, newp: *const u8, newlen: usize) -> i32;
+}
+
+const CTL_KERN: i32 = 1;
+const KERN_PROCARGS2: i32 = 49;
+
+/// A process's command line (kern.procargs2): argc, the exec path, then NUL-separated argv.
+/// Needs the same uid or root; None for other users' processes or ones that have exited.
+pub fn args(pid: i32) -> Option<Vec<String>> {
+    let mib = [CTL_KERN, KERN_PROCARGS2, pid];
+    let mut size: usize = 0;
+    if unsafe { sysctl(mib.as_ptr(), 3, std::ptr::null_mut(), &mut size, std::ptr::null(), 0) } != 0 || size < 4 {
+        return None;
+    }
+    let mut buf = vec![0u8; size];
+    if unsafe { sysctl(mib.as_ptr(), 3, buf.as_mut_ptr(), &mut size, std::ptr::null(), 0) } != 0 {
+        return None;
+    }
+    buf.truncate(size);
+    let argc = u32::from_ne_bytes([buf[0], buf[1], buf[2], buf[3]]) as usize;
+    let mut i = 4;
+    while i < buf.len() && buf[i] != 0 { i += 1; } // exec path
+    while i < buf.len() && buf[i] == 0 { i += 1; } // padding
+    let mut out = Vec::with_capacity(argc);
+    while out.len() < argc && i < buf.len() {
+        let start = i;
+        while i < buf.len() && buf[i] != 0 { i += 1; }
+        out.push(String::from_utf8_lossy(&buf[start..i]).into_owned());
+        i += 1;
+    }
+    Some(out)
+}
+
+/// How a Chromium-family browser was started, from its flags: "headless" (no window, e.g. a
+/// screenshot run from a script), "automated" (driven over DevTools by Playwright, Puppeteer,
+/// Selenium or a CDP client), or None for a browser a person opened. Helpers usually inherit
+/// the flags, and `Resolver::kind` also checks the parent within the same bundle.
+pub fn kind_from_args(args: &[String]) -> Option<&'static str> {
+    let has = |p: &str| args.iter().any(|a| a == p || a.starts_with(&format!("{p}=")));
+    if has("--headless") {
+        Some("headless")
+    } else if has("--remote-debugging-pipe") || has("--remote-debugging-port") || has("--enable-automation") {
+        Some("automated")
+    } else {
+        None
+    }
 }
 
 /// libproc's PROC_PIDTBSDINFO: a 136-byte `proc_bsdinfo` whose parent pid sits at offset 16.
@@ -121,12 +167,48 @@ pub struct Resolver {
     by_path: HashMap<String, AppInfo>,
     /// pid -> the app it was launched from (see `via`), while the process lives.
     via_cache: HashMap<i32, Option<String>>,
+    /// pid -> instance kind (see `kind`), while the process lives.
+    kind_cache: HashMap<i32, Option<&'static str>>,
 }
 
 impl Resolver {
     pub fn for_pid(&mut self, pid: i32) -> Option<AppInfo> {
         let path = exe_path(pid)?;
         Some(self.by_path.entry(path.clone()).or_insert_with(|| describe(&path)).clone())
+    }
+
+    /// Instance kind for a pid: its own flags, else those of ancestors inside the same `.app`
+    /// bundle (a helper's main browser process). Appended to the process name as " [kind]" so a
+    /// headless or automated browser is a different app from the one the person uses.
+    pub fn kind(&mut self, pid: i32) -> Option<&'static str> {
+        if self.kind_cache.len() > 5000 {
+            self.kind_cache.clear();
+        }
+        if let Some(k) = self.kind_cache.get(&pid) {
+            return *k;
+        }
+        let own = exe_path(pid);
+        let bundle = own.as_deref().and_then(bundle_dir).map(str::to_string);
+        let mut kind = args(pid).as_deref().and_then(kind_from_args);
+        let mut cur = pid;
+        while kind.is_none() && bundle.is_some() {
+            let Some(parent) = parent_pid(cur) else { break };
+            if parent <= 1 || parent == cur { break; }
+            let Some(path) = exe_path(parent) else { break };
+            if bundle_dir(&path).map(str::to_string) != bundle { break; }
+            kind = args(parent).as_deref().and_then(kind_from_args);
+            cur = parent;
+        }
+        self.kind_cache.insert(pid, kind);
+        kind
+    }
+
+    /// The process name netlog records: the executable name plus " [headless]" / " [automated]".
+    pub fn tagged_name(&mut self, name: &str, pid: i32) -> String {
+        match self.kind(pid) {
+            Some(k) => format!("{name} [{k}]"),
+            None => name.to_string(),
+        }
     }
 
     /// The app a process was launched from: the nearest ancestor that resolves to an app (a
@@ -188,6 +270,19 @@ mod tests {
         assert_eq!(describe("/usr/libexec/nsurlsessiond").label(), None);
         assert_eq!(versioned_binary("/usr/bin/curl"), None);
         assert_eq!(versioned_binary("/opt/x/versions/notes"), None);
+    }
+
+    #[test]
+    fn kinds() {
+        let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        assert_eq!(kind_from_args(&s(&["Google Chrome", "--headless=new", "--screenshot"])), Some("headless"));
+        assert_eq!(kind_from_args(&s(&["Chromium", "--remote-debugging-pipe", "--enable-automation"])), Some("automated"));
+        assert_eq!(kind_from_args(&s(&["Google Chrome", "--remote-debugging-port=9333"])), Some("automated"));
+        assert_eq!(kind_from_args(&s(&["Google Chrome"])), None);
+        // Our own command line is readable, and a test binary has no browser flags.
+        let me = std::process::id() as i32;
+        assert!(args(me).is_some_and(|a| !a.is_empty()));
+        assert_eq!(Resolver::default().kind(me), None);
     }
 
     #[test]

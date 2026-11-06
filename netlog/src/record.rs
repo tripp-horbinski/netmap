@@ -76,7 +76,8 @@ fn parse_endpoint(s: &str) -> Option<(IpAddr, u16)> {
 type PortOwners = HashMap<(String, u16), String>;
 
 /// Live sockets, port owners, and the pid behind each process name (for bundle resolution).
-fn poll_lsof() -> Result<(HashSet<Conn>, PortOwners, HashMap<String, i32>)> {
+/// Names carry the instance kind (" [headless]") so an automated browser is its own app.
+fn poll_lsof(res: &mut apps::Resolver) -> Result<(HashSet<Conn>, PortOwners, HashMap<String, i32>)> {
     let out = Command::new("lsof").args(["-nP", "+c", "0", "-i", "-F", "pcPnT"]).output()?;
     let text = String::from_utf8_lossy(&out.stdout);
     let mut conns = HashSet::new();
@@ -114,7 +115,7 @@ fn poll_lsof() -> Result<(HashSet<Conn>, PortOwners, HashMap<String, i32>)> {
         };
         match tag {
             'p' => { emit(cur.take(), &cmd); pid = val.parse().unwrap_or(0); }
-            'c' => { cmd = val.to_string(); if pid > 0 { pids.entry(cmd.clone()).or_insert(pid); } }
+            'c' => { cmd = if pid > 0 { res.tagged_name(val, pid) } else { val.to_string() }; if pid > 0 { pids.entry(cmd.clone()).or_insert(pid); } }
             'f' => {
                 emit(cur.take(), &cmd);
                 cur = Some(Default::default());
@@ -344,7 +345,7 @@ impl State {
             let via = self.apps.via(pid);
             let info = owner.epid.and_then(|e| self.apps.for_pid(e)).or_else(|| self.apps.for_pid(owner.pid));
             return match info {
-                Some(i) => (i.process.clone(), Some(i), via),
+                Some(i) => (self.apps.tagged_name(&i.process, pid), Some(i), via),
                 None => (owner.comm, None, via), // exited already; the truncated kernel name is still a name
             };
         }
@@ -373,7 +374,7 @@ impl State {
 
     fn tick(&mut self, full: bool) -> Result<()> {
         let now = db::now();
-        let (live, owners, pids) = if full { poll_lsof().context("running lsof")? } else { Default::default() };
+        let (live, owners, pids) = if full { poll_lsof(&mut self.apps).context("running lsof")? } else { Default::default() };
         // Attribute opens first: it borrows the resolver, which the rest of the tick does not.
         let attributed: Vec<(Open, String, Option<apps::AppInfo>, Option<String>)> = {
             let opens: Vec<Open> = self.opens.drain(..).collect();
