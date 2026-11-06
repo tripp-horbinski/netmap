@@ -147,6 +147,15 @@ fn register_functions(conn: &Connection) -> Result<()> {
     conn.create_scalar_function("is_tracker", 1, det, |ctx| {
         Ok(ctx.get::<Option<String>>(0)?.is_some_and(|h| trackers::is_tracker(&h)))
     })?;
+    conn.create_scalar_function("is_encrypted_dns", 3, det, |ctx| {
+        let host: Option<String> = ctx.get(0)?;
+        let ip: Option<String> = ctx.get(1)?;
+        let port: i64 = ctx.get(2)?;
+        Ok(trackers::is_encrypted_dns(host.as_deref(), ip.as_deref(), port))
+    })?;
+    conn.create_scalar_function("is_doh_probe", 1, det, |ctx| {
+        Ok(ctx.get::<Option<String>>(0)?.is_some_and(|q| trackers::is_doh_probe(&q)))
+    })?;
     Ok(())
 }
 

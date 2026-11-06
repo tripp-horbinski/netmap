@@ -269,6 +269,45 @@ pub fn suggest(conn: &Connection, window: &str) -> Result<Table> {
         }
     }
 
+    // Encrypted DNS going around the resolver. On this Mac we see the connections themselves.
+    let bypass = rows(conn,
+        "SELECT COALESCE(host, ip) AS dest, SUM(port = 853) AS dot, SUM(port = 443) AS doh,
+                GROUP_CONCAT(DISTINCT app) FROM opens
+         WHERE ts >= :since AND is_encrypted_dns(host, ip, port)
+         GROUP BY dest ORDER BY COUNT(*) DESC", since)?;
+    if !bypass.is_empty() {
+        let total: i64 = bypass.iter().map(|r| r[1].as_i64().unwrap_or(0) + r[2].as_i64().unwrap_or(0)).sum();
+        let dests: Vec<String> = bypass.iter().map(|r| s(&r[0])).collect();
+        let apps: Vec<String> = bypass.iter().flat_map(|r| s(&r[3]).split(',').map(String::from).collect::<Vec<_>>()).collect();
+        out.push(Finding {
+            score: 70,
+            kind: "data-quality",
+            finding: format!(
+                "This Mac sent {total} encrypted-DNS connections (DoT/DoH) straight to {}; those lookups \
+                 bypass the resolver log. Apps: {}. If the Mac lists a public DNS server as a fallback, \
+                 macOS upgrades it to encrypted DNS; list only 127.0.0.1 to keep every lookup local.",
+                list(&dests, 3), list(&apps, 3)),
+            run: format!("netlog query \"SELECT app, COALESCE(host,ip) dest, port, COUNT(*) n FROM opens \
+                 WHERE ts >= since('{w}') AND is_encrypted_dns(host, ip, port) GROUP BY 1,2,3 ORDER BY n DESC\""),
+        });
+    }
+    // For LAN devices we only see DNS, so the signal is the discovery probes.
+    for r in rows(conn,
+        "SELECT device, client, COUNT(*) AS n, GROUP_CONCAT(DISTINCT base_domain(qname)) FROM lookups
+         WHERE ts >= :since AND client != 'local' AND is_doh_probe(qname)
+         GROUP BY client ORDER BY n DESC LIMIT 5", since)?
+    {
+        out.push(Finding {
+            score: 45,
+            kind: "data-quality",
+            finding: format!(
+                "Device {} looked up encrypted-DNS endpoints {} times ({}); it may be sending later \
+                 lookups there directly, so its row here is a lower bound",
+                s(&r[0]), s(&r[2]), s(&r[3])),
+            run: format!("netlog report device --device {:?} --since {w}", s(&r[1])),
+        });
+    }
+
     // Plain HTTP: readable by anyone on the network path.
     for r in rows(conn,
         "SELECT app, GROUP_CONCAT(DISTINCT COALESCE(host, org, ip)) FROM connections
@@ -455,6 +494,8 @@ pub fn schema(format: Format) {
             "since('1h')": "unix ts for the start of a window: 90s, 15m, 1h, 7d, 2w or all",
             "base_domain(host)": "'a.b.example.co.uk' -> 'example.co.uk'",
             "is_tracker(host)": "1 if host is a known ad/analytics/tracking domain",
+            "is_encrypted_dns(host, ip, port)": "1 if the connection is DoT (853) or DoH to a known public resolver",
+            "is_doh_probe(qname)": "1 if the lookup is a device discovering encrypted DNS (resolver.arpa, DoH hosts)",
             "datetime(ts, 'unixepoch', 'localtime')": "format a timestamp (built into SQLite)"
         },
         "examples": [
@@ -512,6 +553,8 @@ Windows: --since 90s|15m|1h|24h|7d|all. Default 24h.
   too short-lived for the 2s poll. `(unknown)` app = closed before it could be attributed.
 - Short-lived connections between polls are missed, and root-owned system daemons are invisible.
 - Low hostname coverage (see suggest) means tracker/domain counts are lower bounds.
+- Encrypted DNS (DoT/DoH) goes around the resolver: `suggest` flags it; `lookups` undercounts
+  any device doing it. On macOS, listing a public DNS server as fallback triggers this.
 - Process names are truncated by macOS in places; "2.1.318"-style names are Claude Code.
 
 ## Good questions to answer
