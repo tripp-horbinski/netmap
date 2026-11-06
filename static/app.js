@@ -66,7 +66,7 @@ window.nm = (() => {
   /** An app's icon from its bundle, with the app's color and initial behind it in case there is none. */
   function appIcon(name, { size = 20, live = false, cli = false } = {}) {
     const initial = (name.replace(/^\(/, '')[0] || '?').toUpperCase();
-    return `<span class="app-ic${live ? ' live' : ''}" style="--c:${color(name)};--s:${size}px"><b>${esc(initial)}</b><img src="/api/apps/icon/${encodeURIComponent(rawOf.get(name) ?? name)}${cli ? '?cli=1' : ''}" alt="" loading="lazy" onerror="this.remove()"></span>`;
+    return `<span class="app-ic${live ? ' live' : ''}" style="--c:${color(name)};--s:${size}px"><b>${esc(initial)}</b><img src="/api/apps/icon/${encodeURIComponent(rawOf.get(name) ?? name)}?v=2${cli ? '&cli=1' : ''}" alt="" loading="lazy" onerror="this.remove()"></span>`;
   }
   /** Rewrite process names on a /api/data snapshot in place; the raw name is kept as `raw`. */
   const rawOf = new Map(); // display name -> a raw process name behind it, for icon lookups

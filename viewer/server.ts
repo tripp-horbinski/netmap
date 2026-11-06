@@ -167,7 +167,7 @@ async function bundleIcns(bundle: string): Promise<string | null> {
 }
 
 /** The icon for a process, bundle name or "Name version"; `cli` picks the Terminal stand-in over the generic one. */
-async function appIcon(name: string, cli: boolean): Promise<Response> {
+async function appIcon(req: Request, name: string, cli: boolean): Promise<Response> {
   const base = name.replace(/ \[(headless|automated)\]$/, "").replace(/ \((headless|automated)\)$/, "");
   const row = iconQ.get(base, base, base);
   // Claude Code is a bare binary; the Claude desktop app's icon stands in for it when installed.
@@ -184,7 +184,10 @@ async function appIcon(name: string, cli: boolean): Promise<Response> {
   const icns = (bundle && (await bundleIcns(bundle))) || (cli ? TERMINAL_ICNS : GENERIC_ICNS);
   const key = new Bun.CryptoHasher("sha1").update(icns).digest("hex").slice(0, 16);
   const png = join(ICONS, `${key}.png`);
-  const headers = { "Content-Type": "image/png", "Cache-Control": "public, max-age=86400" };
+  // Revalidate every time (a 304 is cheap) so an app that gains a bundle row is not stuck on
+  // the stand-in icon for a day.
+  const headers = { "Content-Type": "image/png", "Cache-Control": "no-cache", ETag: `"${key}"` };
+  if (req.headers.get("if-none-match") === `"${key}"`) return new Response(null, { status: 304, headers });
   if (!(await Bun.file(png).exists())) {
     await $`mkdir -p ${ICONS}`.quiet().nothrow();
     const r = await $`sips -s format png -z 128 128 ${icns} --out ${png}`.quiet().nothrow();
@@ -218,7 +221,7 @@ const server = Bun.serve({
   routes: {
     "/api/data": { GET: () => json(snapshot()) },
     "/api/apps": { GET: () => json(db.apps()) },
-    "/api/apps/icon/:name": { GET: (req) => appIcon(decodeURIComponent(req.params.name), new URL(req.url).searchParams.get("cli") === "1") },
+    "/api/apps/icon/:name": { GET: (req) => appIcon(req, decodeURIComponent(req.params.name), new URL(req.url).searchParams.get("cli") === "1") },
     "/api/stream": { GET: () => stream() },
     "/api/reset": { POST: () => { db.reset(); return json({ ok: true }); } },
     "/map": { GET: () => staticFile("/map.html") },
