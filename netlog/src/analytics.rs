@@ -443,6 +443,7 @@ pub fn status(conn: &Connection) -> Result<Table> {
         rows: vec![
             kv("recorder", json!(recorder)),
             kv("sniffer", json!(db::get_meta(conn, "sniffer"))),
+            kv("pktap", json!(db::get_meta(conn, "pktap"))),
             kv("connections", json!(rows)),
             kv("distinct_ips", json!(ips)),
             kv("apps", json!(apps)),
