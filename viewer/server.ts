@@ -1,5 +1,5 @@
-// netmap viewer in Bun: serves the Leaflet map in ../static and the same three API
-// routes as `netmap.py --viewer`. `netlog record` does the recording.
+// netmap viewer in Bun: serves the overview, map, devices and sites pages in ../static and
+// the same three API routes as `netmap.py --viewer` plus the device, site and trace APIs. `netlog record` does the recording.
 //
 //   bun run server.ts [--port 8765] [--home LAT,LON] [--root /path/to/netmap] [--db PATH]
 //
@@ -89,6 +89,7 @@ function stream(): Response {
       const enc = new TextEncoder();
       let last = db.maxEventId();
       let idle = 0;
+      controller.enqueue(enc.encode(": connected\n\n")); // flush headers so EventSource reports open
       timer = setInterval(() => {
         try {
           const events = db.eventsAfter(last);
@@ -149,6 +150,7 @@ const server = Bun.serve({
     "/api/data": { GET: () => json(snapshot()) },
     "/api/stream": { GET: () => stream() },
     "/api/reset": { POST: () => { db.reset(); return json({ ok: true }); } },
+    "/map": { GET: () => staticFile("/map.html") },
     "/devices": { GET: () => staticFile("/devices.html") },
     "/sites": { GET: () => staticFile("/sites.html") },
     "/api/sites": { GET: (req) => withWindow((w) => sites.sites(w, browsersOnly(req)))(req) },

@@ -4,101 +4,41 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>netmap · devices</title>
+<script>try{const t=localStorage.getItem('nm-theme');if(t)document.documentElement.dataset.theme=t}catch{}</script>
+<link rel="stylesheet" href="app.css">
+<script src="app.js"></script>
 <style>
-  :root { --bg:#111418; --panel:#171b21; --line:#262c35; --text:#d8dee6; --dim:#7d8794; --accent:#4fd1c5; --warn:#e8b04b; }
-  * { box-sizing: border-box; }
-  html, body { margin:0; height:100%; background:var(--bg); color:var(--text);
-               font: 13px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; }
-  body { display:flex; }
-  a { color:var(--accent); text-decoration:none; }
-  aside { width:380px; flex:none; background:var(--panel); border-right:1px solid var(--line);
-          overflow-y:auto; padding:16px 16px 32px; }
-  main { flex:1; overflow-y:auto; padding:20px 28px 40px; }
-  h1 { font-size:18px; margin:0 0 2px; letter-spacing:.3px; }
-  h1 span { color:var(--accent); }
-  h2 { font-size:11px; text-transform:uppercase; letter-spacing:.8px; color:var(--dim);
-       margin:20px 0 6px; font-weight:600; }
-  h3 { font-size:16px; margin:0; }
-  .sub { color:var(--dim); margin-bottom:12px; }
-  .seg { display:flex; gap:4px; margin-top:12px; }
-  .seg button { flex:1; background:#1d222a; color:var(--text); border:1px solid var(--line);
-                border-radius:6px; padding:5px 0; cursor:pointer; font:inherit; }
-  .seg button.on { background:var(--accent); color:#0b0d10; border-color:var(--accent); font-weight:600; }
-  ul { list-style:none; margin:0; padding:0; }
-  li.row { display:grid; grid-template-columns:1fr 72px 48px; align-items:center; gap:8px;
-           padding:6px 8px; border-radius:6px; cursor:pointer; }
-  li.row:hover { background:#1f252d; }
-  li.row.sel { background:#24303a; outline:1px solid var(--accent); }
-  .name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .name small { display:block; color:var(--dim); }
-  .n { color:var(--dim); font-variant-numeric:tabular-nums; text-align:right; }
-  .n.warn { color:var(--warn); }
-  svg.spark { width:72px; height:22px; display:block; }
-  svg.spark rect { fill:var(--accent); }
-  svg.spark.big { width:100%; height:64px; }
-  .muted { color:var(--dim); }
-  .stats { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin:14px 0; max-width:640px; }
-  .stat { background:#1d222a; border:1px solid var(--line); border-radius:8px; padding:8px 10px; }
-  .stat b { display:block; font-size:20px; font-variant-numeric:tabular-nums; }
-  .stat small { color:var(--dim); }
-  table { border-collapse:collapse; width:100%; max-width:760px; }
-  th { text-align:left; color:var(--dim); font-weight:600; font-size:11px; text-transform:uppercase;
-       letter-spacing:.6px; padding:4px 8px; border-bottom:1px solid var(--line); }
-  th.n, td.n { text-align:right; }
-  td { padding:4px 8px; border-bottom:1px solid var(--line); vertical-align:top; overflow-wrap:anywhere; }
-  .tag { display:inline-block; font-size:10px; padding:1px 5px; border-radius:4px; border:1px solid var(--warn);
-         color:var(--warn); margin-left:6px; vertical-align:middle; }
-  form { display:flex; gap:6px; margin-top:8px; max-width:420px; }
-  input { flex:1; background:#1d222a; color:var(--text); border:1px solid var(--line); border-radius:6px;
-          padding:5px 8px; font:inherit; }
-  button.go { background:none; border:1px solid var(--line); color:var(--text); border-radius:6px;
-              padding:5px 10px; cursor:pointer; font:inherit; }
-  button.go:hover { border-color:var(--accent); }
-  .empty { color:var(--dim); padding:40px 0; }
-  .chart { max-width:640px; margin-top:6px; }
-  .axis { display:flex; justify-content:space-between; color:var(--dim); font-size:11px; }
+  .list li.row { grid-template-columns: 1fr 72px 52px; }
+  .list svg.spark { width: 72px; height: 22px; }
+  .head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .head form { margin-left: auto; }
+  .tiles { margin: 16px 0; max-width: 760px; }
 </style>
 </head>
 <body>
+<header id="nav"></header>
+<div class="shell">
 <aside>
-  <h1>net<span>map</span> <span class="muted">· devices</span></h1>
-  <div class="sub">Who on the LAN asked the resolver what · <a href="/">map</a> · <a href="/sites">site traces</a></div>
-  <div class="seg" id="window">
-    <button data-w="1h">1h</button><button data-w="24h" class="on">24h</button>
+  <h1>Devices</h1>
+  <div class="sub">Who on the LAN asked the resolver what</div>
+  <div class="seg wide" id="window">
+    <button data-w="1h">1h</button><button data-w="24h">24h</button>
     <button data-w="7d">7d</button><button data-w="all">All</button>
   </div>
   <h2>Devices <span class="muted" id="count"></span></h2>
-  <ul id="devices"><li class="muted">Loading…</li></ul>
+  <ul class="list" id="devices"><li class="muted">Loading…</li></ul>
   <p class="muted" id="hint">Devices appear here once they use this Mac (192.168.1.98) as DNS.
      Name them by clicking a row.</p>
 </aside>
 <main id="main"><div class="empty">Pick a device.</div></main>
+</div>
 
 <script>
-const state = { win: '24h', ip: null, list: null, detail: null };
+const { esc, fmtN, ago, when, spark, rows } = nm;
 const $ = (id) => document.getElementById(id);
-const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const fmtN = (n) => n.toLocaleString();
-const ago = (ts) => {
-  const s = Date.now() / 1000 - ts;
-  if (s < 90) return `${Math.round(s)}s ago`;
-  if (s < 5400) return `${Math.round(s / 60)}m ago`;
-  if (s < 172800) return `${Math.round(s / 3600)}h ago`;
-  return `${Math.round(s / 86400)}d ago`;
-};
-const when = (ts) => new Date(ts * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-
-// Single-series bar sparkline. One <title> per bar gives a native hover tooltip.
-function spark(bins, win, big = false) {
-  const max = Math.max(1, ...bins);
-  const w = 100, h = 100, gap = 1, bw = w / bins.length - gap;
-  const bars = bins.map((n, i) => {
-    const bh = n ? Math.max(3, (n / max) * h) : 0;
-    const t0 = win.start + i * win.bin_seconds, t1 = t0 + win.bin_seconds;
-    return `<rect x="${(i * (bw + gap)).toFixed(2)}" y="${(h - bh).toFixed(2)}" width="${bw.toFixed(2)}" height="${bh.toFixed(2)}" rx="1"><title>${fmtN(n)} lookups · ${when(t0)} – ${when(t1)}</title></rect>`;
-  }).join('');
-  return `<svg class="spark${big ? ' big' : ''}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="lookups over time">${bars}</svg>`;
-}
+const state = { win: '24h', ip: null, list: null, detail: null };
+nm.nav('/devices');
+nm.stream();
 
 function renderList() {
   const { devices, window: win } = state.list;
@@ -114,11 +54,6 @@ function renderList() {
   for (const li of $('devices').querySelectorAll('li.row')) li.onclick = () => select(li.dataset.ip);
 }
 
-function rows(list, cols, empty) {
-  if (!list.length) return `<div class="muted">${empty}</div>`;
-  return `<table><thead><tr>${cols.map((c) => `<th class="${c.n ? 'n' : ''}">${c.h}</th>`).join('')}</tr></thead>
-    <tbody>${list.map((r) => `<tr>${cols.map((c) => `<td class="${c.n ? 'n' : ''}">${c.f(r)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
-}
 const tracker = (r) => (r.tracker ? '<span class="tag">tracker</span>' : '');
 
 function renderDetail() {
@@ -127,16 +62,19 @@ function renderDetail() {
   const dev = d.device, win = d.window;
   const pct = dev.lookups ? Math.round((100 * dev.tracker_lookups) / dev.lookups) : 0;
   $('main').innerHTML = `
-    <h3>${esc(dev.device)} <span class="muted">${esc(dev.ip)}${dev.mac ? ' · ' + esc(dev.mac) : ''}</span></h3>
-    <div class="muted">first seen ${when(dev.first_seen)} · last ${ago(dev.last_seen)}</div>
-    <form id="rename"><input id="label" placeholder="Name this device (blank to clear)" value="${esc(dev.label ?? '')}"><button class="go">Save</button></form>
-    <div class="stats">
-      <div class="stat"><b>${fmtN(dev.lookups)}</b><small>lookups</small></div>
-      <div class="stat"><b>${fmtN(dev.domains)}</b><small>domains</small></div>
-      <div class="stat"><b>${fmtN(dev.tracker_lookups)}</b><small>tracker lookups · ${pct}%</small></div>
-      <div class="stat"><b>${fmtN(d.new_names.length)}</b><small>new names</small></div>
+    <div class="head">
+      <div><h3>${esc(dev.device)} <span class="muted">${esc(dev.ip)}${dev.mac ? ' · ' + esc(dev.mac) : ''}</span></h3>
+      <div class="muted">first seen ${when(dev.first_seen)} · last ${ago(dev.last_seen)}</div></div>
+      <form id="rename" class="inline"><input id="label" placeholder="Name this device (blank to clear)" value="${esc(dev.label ?? '')}"><button class="btn">Save</button></form>
     </div>
-    <div class="chart">${spark(dev.bins, win, true)}<div class="axis"><span>${when(win.start)}</span><span>now</span></div></div>
+    <div class="tiles">
+      <div class="tile"><div class="label">Lookups</div><div class="value">${fmtN(dev.lookups)}</div></div>
+      <div class="tile"><div class="label">Domains</div><div class="value">${fmtN(dev.domains)}</div></div>
+      <div class="tile"><div class="label">Tracker lookups</div><div class="value${dev.tracker_lookups ? ' warn' : ''}">${fmtN(dev.tracker_lookups)}</div><div class="sub muted">${pct}% of lookups</div><div class="meter"><i style="width:${pct}%"></i></div></div>
+      <div class="tile"><div class="label">New names</div><div class="value">${fmtN(d.new_names.length)}</div><div class="sub muted">never asked before</div></div>
+    </div>
+    <h2>Lookups over time</h2>
+    <div class="chart">${spark(dev.bins, win)}<div class="axis"><span>${when(win.start)}</span><span>now</span></div></div>
     <h2>Domains</h2>
     ${rows(d.domains.slice(0, 60), [
       { h: 'domain', f: (r) => esc(r.domain) + tracker(r) },
@@ -182,14 +120,7 @@ async function refresh() {
   renderList(); renderDetail();
 }
 
-for (const b of document.querySelectorAll('#window button')) {
-  b.onclick = () => {
-    document.querySelector('#window .on')?.classList.remove('on');
-    b.classList.add('on');
-    state.win = b.dataset.w;
-    refresh();
-  };
-}
+nm.segment($('window'), state.win, (w) => { state.win = w; refresh(); });
 state.ip = decodeURIComponent(location.hash.slice(1)) || null;
 refresh();
 setInterval(refresh, 10000);

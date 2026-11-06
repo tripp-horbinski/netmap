@@ -8,7 +8,7 @@ A live map of where this Mac's network connections go.
 
 ```sh
 ./setup.sh                      # venv + download DB-IP Lite (~150 MB)
-.venv/bin/python netmap.py      # http://127.0.0.1:8765
+.venv/bin/python netmap.py      # http://127.0.0.1:8765 (map only; the Bun viewer below has the full dashboard)
 .venv/bin/python netmap.py --home 43.07,-89.40   # set your location by hand
 ```
 
@@ -34,9 +34,16 @@ Output is a table in a terminal and JSON when piped. Queries are read-only and c
 
 ## Bun viewer (optional replacement for `netmap.py --viewer`)
 
-`viewer/` is the same map server written for [Bun](https://bun.sh): it serves `static/`, reads
+`viewer/` is the map server written for [Bun](https://bun.sh): it serves `static/`, reads
 `data/netmap.sqlite` with `bun:sqlite`, and exposes the same `/api/data`, `/api/stream` and
-`/api/reset` routes, so `static/index.html` is unchanged. `netlog record` still does the recording.
+`/api/reset` routes as the Python viewer plus the device, site and trace APIs below. `netlog record`
+still does the recording.
+
+Pages: `/` is the overview (opens per minute, destinations, LAN devices, tracker share, sites visited,
+a mini world map, the live feed, and the top sites, devices, apps and networks for the chosen window);
+`/map` is the full world map; `/devices` and `/sites` are below. All four share `static/app.css` and
+`static/app.js` (top nav, light/dark theme that follows the system with a toggle, sparklines, tables).
+The old `/#trace=IP` links redirect to `/map#trace=IP`.
 
 ```sh
 cd viewer && bun install
@@ -73,7 +80,7 @@ heuristics get it wrong; pinned sites live in netlog's `meta` table and always s
 `traceroute` in ICMP mode (setuid on macOS, so no sudo; UDP probes die at AT&T) and draws the path
 through every hop that geolocates, with the full hop list in the sidebar. Results cache for six
 hours in a `traces` table; *again* reruns. `GET /api/trace/IP[?fresh=1]`, or open the map at
-`/#trace=IP`. The probe gives up after six silent hops in a row. Hop locations are the DB-IP guess
+`/map#trace=IP`. The probe gives up after six silent hops in a row. Hop locations are the DB-IP guess
 for the block, which is often the carrier's regional hub rather than the router's city.
 
 ## Run it as a service

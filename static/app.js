@@ -1,0 +1,123 @@
+// netmap · shared page helpers: the top nav, the theme toggle, formatting, sparklines, tables
+// and one EventSource per page that feeds the nav's live indicator.
+window.nm = (() => {
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const fmtN = (n) => (n ?? 0).toLocaleString();
+  const compact = (n) => (n >= 10000 ? `${(n / 1000).toFixed(n >= 100000 ? 0 : 1)}K` : fmtN(n));
+  const ago = (ts) => {
+    const s = Math.max(0, Date.now() / 1000 - ts);
+    if (s < 90) return `${Math.round(s)}s ago`;
+    if (s < 5400) return `${Math.round(s / 60)}m ago`;
+    if (s < 172800) return `${Math.round(s / 3600)}h ago`;
+    return `${Math.round(s / 86400)}d ago`;
+  };
+  const when = (ts, secs = false) => new Date(ts * 1000).toLocaleString([], {
+    month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', ...(secs ? { second: '2-digit' } : {}),
+  });
+  const ms = (s) => (s < 1 ? `${Math.round(s * 1000)} ms` : `${s.toFixed(1)} s`);
+
+  // ---- theme: auto (OS) / light / dark, stored in localStorage, stamped on <html data-theme> ----
+  const THEMES = ['auto', 'light', 'dark'];
+  const ICON = { auto: '◐', light: '☀', dark: '☾' };
+  const getTheme = () => { try { return localStorage.getItem('nm-theme') || 'auto'; } catch { return 'auto'; } };
+  const isDark = () => {
+    const t = getTheme();
+    return t === 'dark' || (t === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
+  };
+  function setTheme(t) {
+    try { t === 'auto' ? localStorage.removeItem('nm-theme') : localStorage.setItem('nm-theme', t); } catch {}
+    if (t === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = t;
+    const b = document.getElementById('theme-btn');
+    if (b) { b.textContent = `${ICON[t]} ${t[0].toUpperCase()}${t.slice(1)}`; b.title = 'Theme: follows the system, light, or dark'; }
+    window.dispatchEvent(new CustomEvent('nm:theme', { detail: { dark: isDark() } }));
+  }
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (getTheme() === 'auto') setTheme('auto'); });
+  /** Read a CSS token (e.g. '--accent') as it currently resolves. */
+  const token = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+  // Stable per-app hue; lightness suits the surface so dots read on both themes.
+  function color(name) {
+    let h = 0;
+    for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+    return isDark() ? `hsl(${h % 360}, 70%, 62%)` : `hsl(${h % 360}, 65%, 40%)`;
+  }
+
+  // ---- nav ------------------------------------------------------------------------------
+  const PAGES = [['/', 'Overview'], ['/map', 'Map'], ['/devices', 'Devices'], ['/sites', 'Sites']];
+  function nav(active) {
+    const el = document.getElementById('nav');
+    el.className = 'nav';
+    el.innerHTML = `<a class="brand" href="/">net<span>map</span></a>
+      <nav>${PAGES.map(([h, t]) => `<a href="${h}"${h === active ? ' class="on"' : ''}>${t}</a>`).join('')}</nav>
+      <div class="right"><span class="live" id="nav-live" title="Connection opens per minute, pushed live by netlog record"><i></i><span>offline</span></span>
+      <button class="theme" id="theme-btn"></button></div>`;
+    document.getElementById('theme-btn').onclick = () => setTheme(THEMES[(THEMES.indexOf(getTheme()) + 1) % 3]);
+    setTheme(getTheme());
+  }
+
+  // ---- live stream: one EventSource, recent opens kept for rate + feeds ----------------------
+  const live = { events: [], open: false, listeners: [] };
+  function perMinute() { const now = Date.now() / 1000; return live.events.filter((e) => now - e.ts < 60).length; }
+  function tickNav() {
+    const el = document.getElementById('nav-live'); if (!el) return;
+    live.open = live.src?.readyState === 1;
+    el.classList.toggle('on', live.open);
+    const n = perMinute();
+    el.lastElementChild.textContent = !live.open ? 'offline' : n ? `${n}${n >= 60 ? '+' : ''}/min` : 'live';
+  }
+  function stream(onEvent) {
+    if (onEvent) live.listeners.push(onEvent);
+    if (live.src) return live;
+    live.src = new EventSource('/api/stream');
+    live.src.onopen = () => { live.open = true; tickNav(); };
+    live.src.onerror = () => { live.open = false; tickNav(); };
+    live.src.onmessage = (m) => {
+      const e = JSON.parse(m.data);
+      live.events.unshift(e); live.events.splice(120);
+      tickNav();
+      for (const f of live.listeners) f(e);
+    };
+    setInterval(tickNav, 5000);
+    return live;
+  }
+
+  // ---- marks ---------------------------------------------------------------------------
+  /** Bar sparkline over equal time bins; last bin (now) in the text ink. One <title> per bar. */
+  function spark(bins, win, { cls = '', label = 'lookups' } = {}) {
+    const max = Math.max(1, ...bins);
+    const w = 100, h = 100, gap = 1.2, bw = w / bins.length - gap;
+    const bars = bins.map((n, i) => {
+      const bh = n ? Math.max(4, (n / max) * h) : 0;
+      const t0 = win.start + i * win.bin_seconds, t1 = t0 + win.bin_seconds;
+      return `<rect${i === bins.length - 1 ? ' class="now"' : ''} x="${(i * (bw + gap)).toFixed(2)}" y="${(h - bh).toFixed(2)}" width="${bw.toFixed(2)}" height="${bh.toFixed(2)}" rx="1"><title>${fmtN(n)} ${label} · ${when(t0)} – ${when(t1)}</title></rect>`;
+    }).join('');
+    return `<svg class="spark ${cls}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="${label} over time">${bars}</svg>`;
+  }
+  /** Bin timestamps into `n` equal bins ending now; returns { bins, window } like the devices API. */
+  function binTimes(stamps, sinceSeconds, n = 24) {
+    const now = Date.now() / 1000, start = now - sinceSeconds, bin_seconds = sinceSeconds / n;
+    const bins = new Array(n).fill(0);
+    for (const t of stamps) { const i = Math.floor((t - start) / bin_seconds); if (i >= 0 && i < n) bins[i]++; }
+    return { bins, window: { start, bin_seconds } };
+  }
+  function rows(list, cols, empty) {
+    if (!list.length) return `<div class="muted">${empty}</div>`;
+    return `<table><thead><tr>${cols.map((c) => `<th class="${c.n ? 'n' : ''}">${c.h}</th>`).join('')}</tr></thead>
+      <tbody>${list.map((r) => `<tr>${cols.map((c) => `<td class="${c.n ? 'n' : ''}">${c.f(r)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+  }
+  /** Rows with a proportional wash: items = [{ name, n, href? }]. */
+  function bars(items, empty = 'Nothing yet.') {
+    if (!items.length) return `<li class="muted">${empty}</li>`;
+    const max = Math.max(1, ...items.map((i) => i.n));
+    return items.map((i) => `<li style="--w:${(100 * i.n / max).toFixed(1)}%"><span class="name">${i.href ? `<a href="${esc(i.href)}">${esc(i.name)}</a>` : esc(i.name)}</span><span class="n">${fmtN(i.n)}</span></li>`).join('');
+  }
+  /** Segmented control: buttons with data-w inside `el`; calls onChange(value). */
+  function segment(el, value, onChange) {
+    const set = (v) => { for (const b of el.querySelectorAll('button')) b.classList.toggle('on', b.dataset.w === v); };
+    set(value);
+    el.addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; set(b.dataset.w); onChange(b.dataset.w); });
+  }
+  const WINDOW_SECONDS = { '1h': 3600, '24h': 86400, '7d': 604800, all: Infinity };
+
+  return { esc, fmtN, compact, ago, when, ms, nav, stream, live, perMinute, spark, binTimes, rows, bars, segment, color, token, isDark, WINDOW_SECONDS };
+})();
