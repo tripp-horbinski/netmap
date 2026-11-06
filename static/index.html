@@ -182,10 +182,9 @@ function render() {
   if (d.home && !homeMarker) homeMarker = L.circleMarker([d.home.lat, d.home.lon], { radius: 5, color: token('--panel'), fillColor: token('--accent'), fillOpacity: 1, weight: 2, interactive: false }).addTo(map);
 
   // apps, orgs, newest
-  const byApp = new Map(), byOrg = new Map(), viaOf = new Map();
+  const byApp = new Map(), byOrg = new Map(), viaOf = nm.majorityVia(conns);
   for (const c of conns) {
     (byApp.get(c.process) ?? byApp.set(c.process, new Set()).get(c.process)).add(c.ip);
-    if (c.via) viaOf.set(c.process, c.via);
     const o = c.org || 'Unknown network';
     (byOrg.get(o) ?? byOrg.set(o, new Set()).get(o)).add(c.ip);
   }

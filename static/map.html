@@ -181,7 +181,8 @@ function render() {
   const isLive = c => d.now - c.last_seen <= liveSec;
   const inWin = d.connections.filter(c => d.now - c.last_seen <= win);
   // A filter on an app also covers everything launched from it, at any depth.
-  const under = (c) => { let v = c.process, hops = 0; while (v && hops++ < 8) { if (v === state.proc) return true; v = v === c.process ? c.via : (state.data.via?.[v] ?? null); } return false; };
+  const viaByName = nm.majorityVia(inWin);
+  const under = (c) => { let v = c.process, hops = 0; while (v && hops++ < 8) { if (v === state.proc) return true; v = viaByName.get(v) ?? null; } return false; };
   const conns = state.proc ? inWin.filter(c => under(c)) : inWin;
 
   // Stats
@@ -249,7 +250,7 @@ function renderSidebar(inWin, conns, unknown, isLive, now) {
   const procs = new Map();
   for (const c of inWin) {
     let p = procs.get(c.process);
-    if (!p) procs.set(c.process, p = { ips: new Set(), live: false, via: c.via });
+    if (!p) procs.set(c.process, p = { ips: new Set(), live: false });
     p.ips.add(c.ip); p.live ||= isLive(c);
   }
   document.getElementById('proc-hint').textContent = state.proc ? '· click again to show all' : '· click to filter';
@@ -258,7 +259,8 @@ function renderSidebar(inWin, conns, unknown, isLive, now) {
     `<li class="row ${depth ? 'sub' : ''} ${state.proc === g.name ? 'sel' : ''}" style="--d:${depth}" data-proc="${esc(g.name)}">
        <span class="dot ${g.live ? 'live' : ''}" style="background:${color(g.name)}"></span>
        <span class="name">${esc(g.name)}</span><span class="n">${g.n}</span></li>`;
-  const tree = nm.groupByVia([...procs].map(([name, p]) => ({ name, n: p.ips.size, live: p.live, via: p.via })));
+  const viaOf = nm.majorityVia(inWin);
+  const tree = nm.groupByVia([...procs].map(([name, p]) => ({ name, n: p.ips.size, live: p.live, via: viaOf.get(name) ?? null })));
   document.getElementById('procs').innerHTML = tree.map(([g, d]) => row(g, d)).join('') || '<li class="muted">Waiting for connections…</li>';
 
   // Orgs

@@ -61,6 +61,23 @@ window.nm = (() => {
     for (const c of d.connections) { c.raw = c.process; c.via = d.via?.[c.process] ?? null; c.process = appName(c.process); }
     return d;
   }
+  /** Launcher per displayed app name, by majority of its connections: several raw processes
+   *  can alias to one name (every Chrome helper -> Chrome), and one of them having a launcher
+   *  must not drag the rest under it. */
+  function majorityVia(conns) {
+    const tally = new Map();
+    for (const c of conns) {
+      const t = tally.get(c.process) ?? tally.set(c.process, new Map()).get(c.process);
+      const k = c.via ?? '';
+      t.set(k, (t.get(k) ?? 0) + 1);
+    }
+    const out = new Map();
+    for (const [name, t] of tally) {
+      const total = [...t.values()].reduce((a, b) => a + b, 0);
+      for (const [v, n] of t) if (v && n * 2 > total) out.set(name, v);
+    }
+    return out;
+  }
   /** Nest per-process counts under the app each was launched from, to any depth
    *  (Zentty > Claude Code > gh). Returns [[node, depth], ...] in display order; node.n is the subtree total. */
   function groupByVia(items) {
@@ -220,5 +237,5 @@ window.nm = (() => {
   }
   const WINDOW_SECONDS = { '1h': 3600, '24h': 86400, '7d': 604800, all: Infinity };
 
-  return { esc, fmtN, compact, ago, when, ms, nav, stream, live, perMinute, spark, binTimes, rows, bars, segment, color, token, isDark, WINDOW_SECONDS, countryKey, mix, choroFill, stackedSpark, delta, appName, appInfo, aliasConnections, groupByVia };
+  return { esc, fmtN, compact, ago, when, ms, nav, stream, live, perMinute, spark, binTimes, rows, bars, segment, color, token, isDark, WINDOW_SECONDS, countryKey, mix, choroFill, stackedSpark, delta, appName, appInfo, aliasConnections, groupByVia, majorityVia };
 })();
