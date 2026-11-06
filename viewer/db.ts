@@ -59,18 +59,24 @@ export class NetmapDb {
     return this.connQ.all().map((c) => ({ ...c, names: names.get(c.ip) ?? [] }));
   }
 
-  /** For each process, the app it is usually launched from, from the last week of opens. */
+  /** For each process, the app most of its opens in the last week were launched from. "No
+   *  launcher" counts as a vote, so a Chrome started once from a terminal does not drag every
+   *  Chrome under it: the launcher has to be the majority. */
   viaByProcess(): Record<string, string> {
-    let rows: { process: string; via: string; n: number }[] = [];
+    let rows: { process: string; via: string | null; n: number }[] = [];
     try {
-      rows = this.db.query<{ process: string; via: string; n: number }, [number]>(
-        `SELECT process, via, COUNT(*) AS n FROM events WHERE via IS NOT NULL AND ts >= ?1
-         GROUP BY process, via ORDER BY n DESC`).all(Date.now() / 1000 - 7 * 86400);
+      rows = this.db.query<{ process: string; via: string | null; n: number }, [number]>(
+        `SELECT process, via, COUNT(*) AS n FROM events WHERE ts >= ?1
+         GROUP BY process, via ORDER BY process, n DESC`).all(Date.now() / 1000 - 7 * 86400);
     } catch {
       return {}; // no via column yet
     }
     const out: Record<string, string> = {};
-    for (const r of rows) if (!(r.process in out)) out[r.process] = r.via;
+    const totals = new Map<string, number>();
+    for (const r of rows) totals.set(r.process, (totals.get(r.process) ?? 0) + r.n);
+    for (const r of rows) {
+      if (r.via && !(r.process in out) && r.n * 2 > (totals.get(r.process) ?? 0)) out[r.process] = r.via;
+    }
     return out;
   }
 
