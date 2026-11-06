@@ -1,6 +1,10 @@
-# netmap
+<p align="center"><img src="static/hazel.svg" width="96" alt=""></p>
 
-A live dashboard of where this Mac and the devices on the LAN are talking to.
+# hazel
+
+A live dashboard of where this Mac and the devices on the LAN are talking to, and who sees you.
+hazel is the dashboard; `netlog` (the Rust recorder and CLI) and the `viewer/` server are the parts
+underneath, and the repo keeps its original name, netmap.
 
 - `netlog record` polls `lsof` every 2 s and sniffs DNS answers and TLS SNI for hostnames. No sudo
   needed; it sees every process running as your user.

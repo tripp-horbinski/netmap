@@ -57,8 +57,8 @@ code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
   display: flex; align-items: center; gap: 20px; height: 46px; padding: 0 18px;
   background: var(--panel); border-bottom: 1px solid var(--line);
 }
-.nav .brand { font-size: 16px; font-weight: 700; letter-spacing: .3px; color: var(--text); }
-.nav .brand span { color: var(--accent); }
+.nav .brand { display: flex; align-items: center; gap: 8px; font-size: 16px; font-weight: 700; letter-spacing: .2px; color: var(--text); }
+.nav .brand-ic { width: 22px; height: 22px; }
 .nav .brand:hover { text-decoration: none; }
 .nav nav { display: flex; gap: 2px; }
 .nav nav a {

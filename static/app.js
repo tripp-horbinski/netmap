@@ -122,7 +122,7 @@ window.nm = (() => {
   function nav(active) {
     const el = document.getElementById('nav');
     el.className = 'nav';
-    el.innerHTML = `<a class="brand" href="/">net<span>map</span></a>
+    el.innerHTML = `<a class="brand" href="/"><img class="brand-ic" src="/hazel.svg" alt="">hazel</a>
       <nav>${PAGES.map(([h, t]) => `<a href="${h}"${h === active ? ' class="on"' : ''}>${t}</a>`).join('')}</nav>
       <div class="right"><span class="live" id="nav-live" title="Connection opens per minute, pushed live by netlog record"><i></i><span>offline</span></span>
       <button class="theme" id="theme-btn"></button></div>`;
