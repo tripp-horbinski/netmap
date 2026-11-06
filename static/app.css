@@ -273,6 +273,19 @@ svg.spark rect.now { fill: var(--text); }
 .graph g.site:hover text, .graph g.org:hover text { fill: var(--accent); }
 .graph-table { margin-top: 10px; }
 
+/* ---- app icons -------------------------------------------------------------------------- */
+.app-ic { position: relative; display: inline-grid; place-items: center; width: var(--s, 20px); height: var(--s, 20px);
+          border-radius: 22%; background: var(--c, var(--line-2)); color: #fff; flex: none; vertical-align: middle; overflow: hidden; }
+.app-ic b { font-size: calc(var(--s, 20px) * .55); font-weight: 600; line-height: 1; }
+.app-ic img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.app-ic.live { box-shadow: 0 0 0 2px var(--panel), 0 0 0 4px var(--accent-soft); }
+.apps-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.apps-row a.app { display: flex; gap: 10px; align-items: center; color: inherit; background: var(--panel); border: 1px solid var(--line);
+                  border-radius: var(--radius); padding: 10px 12px; box-shadow: var(--shadow); min-width: 0; }
+.apps-row a.app:hover { text-decoration: none; border-color: var(--accent); }
+.apps-row .nm { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.apps-row .sub { margin: 0; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* ---- findings (overview) ---------------------------------------------------------------- */
 .status { display: flex; flex-direction: column; gap: 2px; margin: 2px auto 14px; }
 .status .big { font-size: 20px; font-weight: 600; }

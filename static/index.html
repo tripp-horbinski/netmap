@@ -31,6 +31,9 @@ if (/^#trace=/.test(location.hash)) location.replace('/map' + location.hash);</s
 
   <div class="strip" id="tiles"></div>
 
+  <h2>Apps <span class="muted">by destinations · CLI tools under the app that ran them</span></h2>
+  <div class="apps-row" id="apps"></div>
+
   <div class="card"><h2>Where it goes <a href="/map">open the map →</a></h2><div id="mini"></div></div>
   <p class="note">Detail lives on the other pages: <a href="/map">map</a> for the live feed, apps and destinations, <a href="/devices">devices</a> for the LAN, <a href="/sites">sites</a> for what each site pulls in.</p>
 </div>
@@ -162,6 +165,17 @@ function render() {
     l.marker.setRadius(radius).setStyle(style);
     l.arc?.setStyle({ color: col, weight: g.live ? 1.4 : 0.7, opacity: g.live ? 0.8 : 0.15, dashArray: g.live ? null : '3 5' });
   }
+  // apps: one card per top-level app, its CLI children named beneath
+  const byApp = new Map();
+  for (const c of conns) (byApp.get(c.process) ?? byApp.set(c.process, new Set()).get(c.process)).add(c.ip);
+  const viaOf = nm.majorityVia(conns);
+  const tree = nm.groupByVia([...byApp].map(([name, s]) => ({ name, n: s.size, live: conns.some((c) => c.process === name && isLive(c)), via: viaOf.get(name) ?? null })));
+  const names = (g) => g.children.flatMap((c) => [c.name, ...names(c)]);
+  $('apps').innerHTML = tree.filter(([, depth]) => depth === 0).slice(0, 12).map(([g]) => `
+    <a class="app" href="/map#app=${encodeURIComponent(g.name)}" title="${esc(g.name)} · ${fmtN(g.n)} destination${g.n === 1 ? '' : 's'}">${nm.appIcon(g.name, { size: 32, live: g.live })}
+      <div style="min-width:0"><div class="nm">${esc(g.name)}</div><div class="sub muted">${fmtN(g.n)} destination${g.n === 1 ? '' : 's'}${g.children.length ? ' · ' + esc(names(g).slice(0, 4).join(', ')) + (names(g).length > 4 ? '…' : '') : ''}</div></div></a>`).join('')
+    || '<div class="muted">Waiting for connections…</div>';
+
   if (d.home && !homeMarker) homeMarker = L.circleMarker([d.home.lat, d.home.lon], { radius: 5, color: token('--panel'), fillColor: token('--accent'), fillOpacity: 1, weight: 2, interactive: false }).addTo(map);
 
 }

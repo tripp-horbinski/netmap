@@ -150,6 +150,32 @@ function withWindow(fn: (window: string) => unknown): (req: Request) => Response
   };
 }
 
+// ---- app icons: rendered from the bundle's .icns with sips, cached in data/icons ------------------
+const ICONS = join(DATA, "icons");
+const iconQ = db.db.query<{ path: string | null; name: string | null }, [string, string, string]>(
+  "SELECT path, name FROM apps WHERE process = ?1 OR name = ?2 OR name || ' ' || version = ?3 ORDER BY path LIKE '%.app/%' DESC LIMIT 1");
+async function appIcon(name: string): Promise<Response> {
+  const base = name.replace(/ \[(headless|automated)\]$/, "").replace(/ \((headless|automated)\)$/, "");
+  const row = iconQ.get(base, base, base);
+  // Claude Code is a bare binary; the Claude desktop app's icon stands in for it when installed.
+  const bundle = row?.path?.match(/^(.*?\.app)\//)?.[1]
+    ?? (row?.name === "Claude Code" || /^Claude Code/.test(base) ? "/Applications/Claude.app" : undefined);
+  if (!bundle) return new Response("no icon", { status: 404 });
+  const key = new Bun.CryptoHasher("sha1").update(bundle).digest("hex").slice(0, 16);
+  const png = join(ICONS, `${key}.png`);
+  const headers = { "Content-Type": "image/png", "Cache-Control": "public, max-age=86400" };
+  if (await Bun.file(png).exists()) return new Response(Bun.file(png), { headers });
+  const plist = join(bundle, "Contents/Info.plist");
+  const iconFile = (await $`plutil -extract CFBundleIconFile raw -o - ${plist}`.quiet().nothrow().text()).trim();
+  if (!iconFile) return new Response("no icon", { status: 404 });
+  const icns = join(bundle, "Contents/Resources", iconFile.endsWith(".icns") ? iconFile : `${iconFile}.icns`);
+  if (!(await Bun.file(icns).exists())) return new Response("no icon", { status: 404 });
+  await $`mkdir -p ${ICONS}`.quiet().nothrow();
+  const r = await $`sips -s format png -z 128 128 ${icns} --out ${png}`.quiet().nothrow();
+  if (r.exitCode !== 0 || !(await Bun.file(png).exists())) return new Response("no icon", { status: 404 });
+  return new Response(Bun.file(png), { headers });
+}
+
 /** The extension posts from a chrome-extension:// origin, which needs CORS headers; nothing else may. */
 function cors(req: Request, res: Response): Response {
   const origin = req.headers.get("origin") ?? "";
@@ -175,6 +201,7 @@ const server = Bun.serve({
   routes: {
     "/api/data": { GET: () => json(snapshot()) },
     "/api/apps": { GET: () => json(db.apps()) },
+    "/api/apps/icon/:name": { GET: (req) => appIcon(decodeURIComponent(req.params.name)) },
     "/api/stream": { GET: () => stream() },
     "/api/reset": { POST: () => { db.reset(); return json({ ok: true }); } },
     "/map": { GET: () => staticFile("/map.html") },

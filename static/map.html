@@ -81,6 +81,8 @@ const { esc, color, token } = nm;
 const ago = (sec) => nm.ago(Date.now() / 1000 - Math.max(0, sec));
 nm.nav('/map');
 const state = { data: null, win: 'all', proc: null };
+// /map#app=NAME opens the map filtered to that app (the overview's app cards link here).
+{ const m = /^#app=(.+)$/.exec(location.hash); if (m) state.proc = decodeURIComponent(m[1]); }
 const layers = new Map();   // location key -> { marker, arc }
 let homeMarker = null;
 
@@ -255,7 +257,7 @@ function renderSidebar(inWin, conns, unknown, isLive, now) {
   // CLI tools sit under the app that launched them (via); the parent row filters to the whole group.
   const row = (g, depth) =>
     `<li class="row ${depth ? 'sub' : ''} ${state.proc === g.name ? 'sel' : ''}" style="--d:${depth}" data-proc="${esc(g.name)}">
-       <span class="dot ${g.live ? 'live' : ''}" style="background:${color(g.name)}"></span>
+       ${nm.appIcon(g.name, { size: 18, live: g.live })}
        <span class="name">${esc(g.name)}</span><span class="n">${g.n}</span></li>`;
   const viaOf = nm.majorityVia(inWin);
   const tree = nm.groupByVia([...procs].map(([name, p]) => ({ name, n: p.ips.size, live: p.live, via: viaOf.get(name) ?? null })));

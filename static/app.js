@@ -63,9 +63,15 @@ window.nm = (() => {
     if (a?.name) return a.version && p === a.version ? `${a.name} ${a.version}` : a.name; // "Claude Code 2.1.319": the binary is named by its version
     return p.replace(/ Helper( \(.*\))?$/, '').replace(/ \((Renderer|GPU|Plugin|Networking|Alerts|Utility)\)$/, '');
   }
+  /** An app's icon from its bundle, with the app's color and initial behind it in case there is none. */
+  function appIcon(name, { size = 20, live = false } = {}) {
+    const initial = (name.replace(/^\(/, '')[0] || '?').toUpperCase();
+    return `<span class="app-ic${live ? ' live' : ''}" style="--c:${color(name)};--s:${size}px"><b>${esc(initial)}</b><img src="/api/apps/icon/${encodeURIComponent(rawOf.get(name) ?? name)}" alt="" loading="lazy" onerror="this.remove()"></span>`;
+  }
   /** Rewrite process names on a /api/data snapshot in place; the raw name is kept as `raw`. */
+  const rawOf = new Map(); // display name -> a raw process name behind it, for icon lookups
   function aliasConnections(d) {
-    for (const c of d.connections) { c.raw = c.process; c.via = d.via?.[c.process] ?? null; c.process = appName(c.process); }
+    for (const c of d.connections) { c.raw = c.process; c.via = d.via?.[c.process] ?? null; c.process = appName(c.process); if (!rawOf.has(c.process)) rawOf.set(c.process, c.raw); }
     return d;
   }
   /** Launcher per displayed app name, by majority of its connections: several raw processes
@@ -244,5 +250,5 @@ window.nm = (() => {
   }
   const WINDOW_SECONDS = { '1h': 3600, '24h': 86400, '7d': 604800, all: Infinity };
 
-  return { esc, fmtN, compact, ago, when, ms, nav, stream, live, perMinute, spark, binTimes, rows, bars, segment, color, token, isDark, WINDOW_SECONDS, countryKey, mix, choroFill, stackedSpark, delta, appName, appInfo, aliasConnections, groupByVia, majorityVia };
+  return { esc, fmtN, compact, ago, when, ms, nav, stream, live, perMinute, spark, binTimes, rows, bars, segment, color, token, isDark, WINDOW_SECONDS, countryKey, mix, choroFill, stackedSpark, delta, appName, appInfo, appIcon, aliasConnections, groupByVia, majorityVia };
 })();
