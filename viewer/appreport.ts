@@ -14,6 +14,11 @@ export interface AppSummary {
 export interface AppCard extends AppSummary {
   window: { since: number; now: number; start: number; bin_seconds: number };
   bins: number[];
+  /** The last opens with their lifetimes (TCP only: FIN/RST stamp the end), newest last. */
+  timeline: { host: string; org: string | null; cls: HostClass; proto: string; offset: number; end_offset: number | null; via: string | null }[];
+  timeline_start: number;
+  /** Median lifetime in seconds per class, over closed TCP connections in the window. */
+  lifetime: Partial<Record<HostClass, number>>;
   host_list: { host: string; ip: string; org: string | null; country: string | null; cls: HostClass; opens: number; last: number }[];
   company_list: { org: string; hosts: number; classes: HostClass[] }[];
   country_list: { country: string; hosts: number }[];
@@ -21,13 +26,15 @@ export interface AppCard extends AppSummary {
 }
 
 const BINS = 24;
-interface Row { ts: number; process: string; via: string | null; ip: string; org: string | null; country: string | null; host: string | null }
+interface Row { ts: number; process: string; via: string | null; ip: string; org: string | null; country: string | null; host: string | null; proto: string; closed: number | null }
 
 export class AppReportDb {
   private opensQ; private appsQ; private minTsQ;
   constructor(db: Database) {
+    const cols = new Set(db.query<{ name: string }, []>("PRAGMA table_info(events)").all().map((c) => c.name));
+    const closed = cols.has("closed") ? "e.closed" : "NULL AS closed";
     this.opensQ = db.query<Row, [number]>(`
-      SELECT e.ts, e.process, e.via, e.ip, i.org, i.country,
+      SELECT e.ts, e.process, e.via, e.ip, i.org, i.country, e.proto, ${closed},
              (SELECT n.name FROM ip_name n WHERE n.ip = e.ip ORDER BY n.source = 'sni' DESC, n.last_seen DESC LIMIT 1) AS host
       FROM events e LEFT JOIN ip_info i USING (ip) WHERE e.ts >= ?1 ORDER BY e.ts`);
     this.appsQ = db.query<AppRowLite, []>("SELECT process, name, version, path, bundle_id, feed_url FROM apps");
@@ -87,11 +94,25 @@ export class AppReportDb {
       if (h.country) countries.set(h.country, (countries.get(h.country) ?? 0) + 1);
     }
     const rank = (c: HostClass) => CLASS_ORDER.indexOf(c);
+    const recent = rows.slice(-60);
+    const t0 = recent[0]?.ts ?? axis.start;
+    const timeline = recent.map((r) => {
+      const host = r.host ?? r.ip;
+      return { host, org: r.org, cls: hosts.get(host)!.cls, proto: r.proto, offset: r.ts - t0, end_offset: r.closed != null ? r.closed - t0 : null, via: r.via };
+    });
+    const perClass = new Map<HostClass, number[]>();
+    for (const r of rows) {
+      if (r.closed == null || r.proto !== "TCP") continue;
+      const cls = hosts.get(r.host ?? r.ip)!.cls;
+      (perClass.get(cls) ?? perClass.set(cls, []).get(cls)!).push(r.closed - r.ts);
+    }
+    const lifetime: Partial<Record<HostClass, number>> = {};
+    for (const [cls, ds] of perClass) { ds.sort((a, b) => a - b); lifetime[cls] = ds[Math.floor(ds.length / 2)]!; }
     return {
       name, processes: [...processes].sort(), opens: rows.length, hosts: hosts.size, destinations: new Set(rows.map((r) => r.ip)).size,
       companies: companies.size, by_class, bundle_id: info?.bundle_id ?? null, version: info?.version ?? null, feed_url: info?.feed_url ?? null,
       path: info?.path ?? null, via: [...via].sort((a, b) => b[1] - a[1]).map(([v]) => v), last,
-      window: axis, bins,
+      window: axis, bins, timeline, timeline_start: t0, lifetime,
       host_list: [...hosts].map(([host, h]) => ({ host, ...h })).sort((a, b) => rank(a.cls) - rank(b.cls) || b.opens - a.opens),
       company_list: [...companies].map(([org, c]) => ({ org, hosts: c.hosts, classes: [...c.classes].sort((a, b) => rank(a) - rank(b)) })).sort((a, b) => b.hosts - a.hosts),
       country_list: [...countries].map(([country, hosts]) => ({ country, hosts })).sort((a, b) => b.hosts - a.hosts),
@@ -102,7 +123,7 @@ export class AppReportDb {
   list(window: string): AppSummary[] {
     const { apps, axis, acc } = this.collect(window);
     return [...acc].map(([name, a]) => {
-      const { window: _w, bins: _b, host_list: _h, company_list: _c, country_list: _k, via_list: _v, ...summary } = this.build(name, a.rows, a.processes, apps, axis);
+      const { window: _w, bins: _b, host_list: _h, company_list: _c, country_list: _k, via_list: _v, timeline: _t, timeline_start: _s, lifetime: _l, ...summary } = this.build(name, a.rows, a.processes, apps, axis);
       return summary;
     }).sort((x, y) => y.destinations - x.destinations || y.opens - x.opens);
   }

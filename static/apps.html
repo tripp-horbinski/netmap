@@ -90,6 +90,31 @@ function renderOverview() {
       (Sentry, Datadog, Segment, Firebase…); ads is netlog's tracker list; CDN is shared edge infrastructure. Click an app for its card.</p>`;
 }
 
+// Gantt of the app's recent connections: one row each, open to close (a tick when still open or
+// UDP, which has no FIN), grouped by company, colored by what the host is to the app.
+function timeline(c) {
+  if (!c.timeline.length) return '<div class="muted">No connections in this window.</div>';
+  const rowsIn = c.timeline;
+  const span = Math.max(0.5, ...rowsIn.map((r) => r.end_offset ?? r.offset));
+  const pct = (s) => (100 * s / span).toFixed(2) + '%';
+  const groups = new Map();
+  for (const r of rowsIn) { const k = r.org ?? 'Unknown network'; (groups.get(k) ?? groups.set(k, []).get(k)).push(r); }
+  const ordered = [...groups].sort((a, b) => Math.min(...a[1].map((r) => r.offset)) - Math.min(...b[1].map((r) => r.offset)));
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => `<span style="left:${(100 * f).toFixed(0)}%">${nm.ms(span * f)}</span>`).join('');
+  const bar = (r) => {
+    const title = `${r.host} · ${r.proto}${r.via ? ` · via ${r.via}` : ''} · opened ${nm.when(c.timeline_start + r.offset, true)}${r.end_offset != null ? ` · lived ${nm.ms(r.end_offset - r.offset)}` : r.proto === 'UDP' ? ' · QUIC, no close seen' : ' · still open or close not seen'}`;
+    const shape = r.end_offset != null
+      ? `<i class="c-${r.cls}" style="left:${pct(r.offset)};width:${pct(Math.max(0.004 * span, r.end_offset - r.offset))}"></i>`
+      : `<i class="c-${r.cls} tick" style="left:${pct(r.offset)}"></i>`;
+    return `<div class="r" title="${esc(title)}"><div class="h">${esc(r.host)}<small>${r.proto}</small></div><div class="track">${shape}</div><div class="ms">${r.end_offset != null ? nm.ms(r.end_offset - r.offset) : '+' + nm.ms(r.offset)}</div></div>`;
+  };
+  return `<div class="gantt"><div class="ruler"><span>company / host</span><div class="ticks">${ticks}</div><span style="text-align:right">lived</span></div>
+    ${ordered.map(([org, rs]) => {
+      const s = Math.min(...rs.map((r) => r.offset)), e = Math.max(...rs.map((r) => r.end_offset ?? r.offset));
+      return `<div class="grp"><div class="org">${esc(org)}<small>${rs.length}</small></div><div class="track"><i style="left:${pct(s)};width:${pct(Math.max(0.004 * span, e - s))}"></i></div><div class="ms"></div></div>` + rs.map(bar).join('');
+    }).join('')}</div>`;
+}
+
 function renderCard() {
   const c = state.card;
   if (!c) { renderOverview(); return; }
@@ -112,6 +137,8 @@ function renderCard() {
     <div class="chart">${segbar(c.by_class, true)}</div>
     <h2>Opens over time</h2>
     <div class="chart">${spark(c.bins, c.window, { label: 'opens' })}<div class="axis"><span>${when(c.window.start)}</span><span>now</span></div></div>
+    <h2>Recent connections <span class="muted">last ${c.timeline.length} · bar = open to close${Object.keys(c.lifetime).length ? ' · typical lifetime ' + CLASSES.filter(([k]) => c.lifetime[k] != null).map(([k, l]) => `${l} ${nm.ms(c.lifetime[k])}`).join(', ') : ''}</span></h2>
+    ${timeline(c)}
     <div class="cols">
       <div><h2>Companies</h2>${rows(c.company_list, [
         { h: 'company', f: (r) => `<a href="/companies#${encodeURIComponent(r.org)}">${esc(r.org)}</a>` },

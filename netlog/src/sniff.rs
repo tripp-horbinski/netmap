@@ -12,12 +12,15 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 /// DNS responses; outbound HTTPS segments big enough to carry a ClientHello (skips bare
-/// ACKs); every TCP SYN (new connection); and QUIC long-header packets (new HTTP/3
-/// connections). The ip6[...] offsets assume no IPv6 extension headers, which is the norm.
+/// ACKs); every TCP SYN (new connection) and every FIN or RST (its end); and QUIC
+/// long-header packets (new HTTP/3 connections). The ip6[...] offsets assume no IPv6
+/// extension headers, which is the norm.
 const FILTER: &str = "udp src port 53 \
     or (tcp dst port 443 and greater 100) \
-    or (ip and tcp[13] & 0x12 = 2) \
+    or (ip and tcp[13] & 0x17 != 0 and tcp[13] & 0x10 = 0) \
+    or (ip and tcp[13] & 0x05 != 0) \
     or (ip6 and ip6[6] = 6 and ip6[53] & 0x12 = 2) \
+    or (ip6 and ip6[6] = 6 and ip6[53] & 0x05 != 0) \
     or (ip and udp dst port 443 and udp[8] & 0x80 != 0) \
     or (ip6 and ip6[6] = 17 and udp dst port 443 and ip6[48] & 0x80 != 0)";
 
@@ -36,9 +39,17 @@ pub struct Open {
     pub proto: &'static str, // "TCP" or "UDP"
 }
 
+/// A TCP connection ending (FIN or RST, either direction); `a` and `b` are its two ends.
+pub struct Close {
+    pub ts: f64,
+    pub a: (IpAddr, u16),
+    pub b: (IpAddr, u16),
+}
+
 pub enum Event {
     Name(Name),
     Open(Open),
+    Close(Close),
     /// From pktap (tagger.rs): which process owns a local port.
     Owner(crate::tagger::Owner),
 }
@@ -177,8 +188,12 @@ impl Parser {
                 None
             }
             6 => {
-                if body.get(13)? & 0x12 == 0x02 {
+                let flags = *body.get(13)?;
+                if flags & 0x12 == 0x02 {
                     self.open(dst, be16(body, 2)? as u16, be16(body, 0)? as u16, "TCP");
+                }
+                if flags & 0x05 != 0 {
+                    let _ = self.tx.send(Event::Close(Close { ts: self.ts, a: (src, be16(body, 0)? as u16), b: (dst, be16(body, 2)? as u16) }));
                 }
                 self.tls(src, dst, body)
             }

@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::db;
-use crate::sniff::{self, Event, Name, Open};
+use crate::sniff::{self, Close, Event, Name, Open};
 use crate::tagger::{self, Owner};
 use crate::apps;
 
@@ -269,6 +269,7 @@ pub fn run(db_path: &Path, data_dir: &Path, opts: Options) -> Result<()> {
         apps: apps::Resolver::default(),
         apps_known: HashSet::new(),
         apps_seen_at: HashMap::new(),
+        closes: Vec::new(),
         db_path: db_path.to_path_buf(),
         chown_ticks: if tagger::is_root() { 3 } else { 0 },
     };
@@ -314,6 +315,13 @@ pub fn run(db_path: &Path, data_dir: &Path, opts: Options) -> Result<()> {
                 }
             }
             Ok(Event::Owner(o)) => st.remember_owner(o),
+            Ok(Event::Close(c)) => {
+                // Only ends of connections we could have logged: one end public, the other ours.
+                if is_public(c.a.0) != is_public(c.b.0) {
+                    st.closes.push((c, Instant::now()));
+                    first_name.get_or_insert_with(Instant::now);
+                }
+            }
             Err(RecvTimeoutError::Timeout | RecvTimeoutError::Disconnected) => {}
         }
     }
@@ -339,6 +347,8 @@ struct State {
     /// app's version follows its updates.
     apps_known: HashSet<String>,
     apps_seen_at: HashMap<String, Instant>,
+    /// Connection ends waiting to be matched to their open (which may not be written yet).
+    closes: Vec<(Close, Instant)>,
     db_path: std::path::PathBuf,
     /// As root, hand the database files to the directory's owner for the first few ticks
     /// (the WAL and shm files appear on the first write), so the user's viewer can still write.
@@ -419,7 +429,7 @@ impl State {
                 }
             }
         }
-        let State { conn, geo, known, rdns, rdns_results, status, pktap_status, names, apps_known, apps_seen_at, .. } = self;
+        let State { conn, geo, known, rdns, rdns_results, status, pktap_status, names, apps_known, apps_seen_at, closes, .. } = self;
         let tx = conn.unchecked_transaction()?;
         for a in new_apps {
             apps_known.insert(a.process.clone());
@@ -459,8 +469,8 @@ impl State {
         for (o, process, _, via) in attributed {
             let ip = o.ip.to_string();
             tx.execute(
-                "INSERT INTO events (ts, process, ip, port, proto, via) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                (o.ts, &process, &ip, o.port, o.proto, &via),
+                "INSERT INTO events (ts, process, ip, port, proto, via, lport) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                (o.ts, &process, &ip, o.port, o.proto, &via, o.local_port),
             )?;
             // Make sure short-lived connections still show up in `conn` (and on the map).
             tx.execute(
@@ -482,6 +492,18 @@ impl State {
         for (ip, host) in rdns_results.try_iter() {
             tx.execute("UPDATE ip_info SET hostname = ?1 WHERE ip = ?2", (host, ip))?;
         }
+        // Connection ends: stamp the matching open (same remote, same local port, still open).
+        // An end can arrive before its open is written, so unmatched ones wait up to 5 s.
+        let tick_now = Instant::now();
+        closes.retain(|(c, seen)| {
+            let (remote, local) = if is_public(c.a.0) { (c.a, c.b) } else { (c.b, c.a) };
+            let n = tx.execute(
+                "UPDATE events SET closed = ?1 WHERE id = (SELECT id FROM events WHERE ip = ?2 AND port = ?3 AND lport = ?4
+                   AND proto = 'TCP' AND closed IS NULL AND ts <= ?1 ORDER BY ts DESC LIMIT 1)",
+                (c.ts, remote.0.to_string(), remote.1, local.1),
+            ).unwrap_or(0);
+            n == 0 && tick_now.duration_since(*seen) < Duration::from_secs(5)
+        });
         if full {
             db::set_meta(&tx, "heartbeat", &now.to_string())?;
             db::set_meta(&tx, "sniffer", &status.lock().unwrap())?;

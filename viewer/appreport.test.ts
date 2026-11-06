@@ -33,7 +33,7 @@ describe("app report", () => {
   test("merges helpers into one card with classified hosts, companies and launchers", () => {
     const db = new Database(":memory:");
     db.exec(`
-      CREATE TABLE events (id INTEGER PRIMARY KEY, ts REAL, process TEXT, ip TEXT, port INTEGER, proto TEXT, via TEXT);
+      CREATE TABLE events (id INTEGER PRIMARY KEY, ts REAL, process TEXT, ip TEXT, port INTEGER, proto TEXT, via TEXT, lport INTEGER, closed REAL);
       CREATE TABLE ip_info (ip TEXT PRIMARY KEY, org TEXT, country TEXT);
       CREATE TABLE ip_name (ip TEXT, name TEXT, source TEXT, last_seen REAL);
       CREATE TABLE apps (process TEXT PRIMARY KEY, path TEXT, bundle_id TEXT, name TEXT, version TEXT, feed_url TEXT, first_seen REAL);
@@ -45,6 +45,7 @@ describe("app report", () => {
         (${NOW - 30},'Spotify Helper','3.3.3.3',443,'TCP',NULL),(${NOW - 20},'Spotify Helper','2.2.2.2',443,'TCP',NULL),
         (${NOW - 10},'curl','5.5.5.5',443,'TCP','Zentty');
     `);
+    db.exec(`UPDATE events SET closed = ts + 0.4 WHERE ip = '5.5.5.5'; UPDATE events SET closed = ts + 2.0 WHERE ip = '2.2.2.2'`);
     const r = new AppReportDb(db);
     const list = r.list("1h");
     expect(list.map((a) => a.name)).toEqual(["Spotify", "curl"]);
@@ -57,6 +58,11 @@ describe("app report", () => {
     expect(card.company_list[0]).toMatchObject({ org: "Spotify AB", hosts: 1 });
     expect(card.country_list.map((c) => c.country)).toEqual(["United States", "Sweden"]);
     expect(card.bins.reduce((a, b) => a + b, 0)).toBe(4);
+    expect(card.timeline.length).toBe(4);
+    expect(card.timeline[0]!.end_offset).toBeCloseTo(0.4, 5);
+    expect(card.timeline[2]!.end_offset).toBeNull(); // doubleclick never closed
+    expect(card.lifetime["first-party"]).toBeCloseTo(0.4, 5);
+    expect(card.lifetime.telemetry).toBeCloseTo(2.0, 5);
     expect(r.card("curl", "1h")!.via_list).toEqual([{ via: "Zentty", opens: 1 }]);
     expect(r.card("nope", "1h")).toBeNull();
   });

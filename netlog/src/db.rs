@@ -58,7 +58,8 @@ FROM conn c LEFT JOIN ip_info i USING (ip);
 
 DROP VIEW IF EXISTS opens;
 CREATE VIEW opens AS
-SELECT e.id, e.ts, e.process AS app, e.via, e.ip, e.port, e.proto,
+SELECT e.id, e.ts, e.process AS app, e.via, e.ip, e.port, e.proto, e.closed,
+  CASE WHEN e.closed IS NOT NULL THEN e.closed - e.ts END AS duration,
   (SELECT n.name FROM ip_name n WHERE n.ip = e.ip
      ORDER BY n.source = 'sni' DESC, n.last_seen DESC LIMIT 1) AS host,
   i.org, i.city, i.region, i.country, i.lat, i.lon
@@ -150,6 +151,10 @@ fn migrate(conn: &Connection) -> Result<()> {
     if !has("events", "via")? {
         // The app the process was launched from (a terminal, an IDE), when it has one.
         conn.execute_batch("ALTER TABLE events ADD COLUMN via TEXT")?;
+    }
+    if !has("events", "lport")? {
+        // Local port, to match a FIN/RST back to its open; `closed` is when that happened.
+        conn.execute_batch("ALTER TABLE events ADD COLUMN lport INTEGER; ALTER TABLE events ADD COLUMN closed REAL")?;
     }
     Ok(())
 }
