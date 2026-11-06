@@ -6,7 +6,7 @@
 
 use anyhow::{Context, Result};
 use rusqlite::Connection;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{Read, Write};
 use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream, ToSocketAddrs, UdpSocket};
 use std::path::Path;
@@ -30,7 +30,7 @@ const NEGATIVE_TTL: u64 = 30;
 /// One answered query, for the log.
 struct Lookup {
     ts: f64,
-    client: IpAddr,
+    client: Option<IpAddr>, // None = this machine
     qname: String,
     qtype: u16,
     rcode: u8,
@@ -107,11 +107,15 @@ impl Cache {
     }
 }
 
+/// Client value under which this machine's own lookups are logged, whatever network it's
+/// on. The devices row for it is labelled with the computer name.
+pub const LOCAL: &str = "local";
+
 struct Resolver {
     upstreams: Vec<SocketAddr>,
-    /// This machine's LAN address: lookups from 127.0.0.1 are logged under it, so a host
-    /// that uses its own resolver shows up as one device, not two.
-    local_ip: Option<IpAddr>,
+    /// Every address of this machine's interfaces, refreshed as networks change. Lookups
+    /// from any of them (or loopback) are logged as LOCAL, so the host is one device.
+    local_ips: Arc<Mutex<HashSet<IpAddr>>>,
     cache: Mutex<Cache>,
     log: Sender<Lookup>,
 }
@@ -120,9 +124,10 @@ impl Resolver {
     /// Answer one query (wire format in, wire format out). Works for UDP and TCP payloads.
     fn handle(&self, query: &[u8], client: IpAddr) -> Option<Vec<u8>> {
         let start = Instant::now();
-        let client = match self.local_ip {
-            Some(lan) if client.is_loopback() => lan,
-            _ => client,
+        let client = if client.is_loopback() || self.local_ips.lock().unwrap().contains(&client) {
+            None
+        } else {
+            Some(client)
         };
         let id = &query[..2.min(query.len())];
         let q = parse(query)?;
@@ -169,7 +174,7 @@ impl Resolver {
         None
     }
 
-    fn record(&self, client: IpAddr, q: &Parsed, rcode: u8, answers: Vec<IpAddr>, cached: bool, start: Instant) {
+    fn record(&self, client: Option<IpAddr>, q: &Parsed, rcode: u8, answers: Vec<IpAddr>, cached: bool, start: Instant) {
         let _ = self.log.send(Lookup {
             ts: db::now(),
             client,
@@ -198,11 +203,12 @@ fn writer(conn: Connection, rx: mpsc::Receiver<Lookup>) {
 fn write_batch(conn: &Connection, batch: &[Lookup]) -> Result<()> {
     let tx = conn.unchecked_transaction()?;
     for l in batch {
+        let client = l.client.map_or_else(|| LOCAL.to_string(), |c| c.to_string());
         let answers = l.answers.iter().map(|a| a.to_string()).collect::<Vec<_>>().join(" ");
         tx.execute(
             "INSERT INTO dns (ts, client, qname, qtype, rcode, answers, cached, ms)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            (l.ts, l.client.to_string(), &l.qname, l.qtype, l.rcode, answers, l.cached, l.ms),
+            (l.ts, &client, &l.qname, l.qtype, l.rcode, answers, l.cached, l.ms),
         )?;
         for a in &l.answers {
             tx.execute(
@@ -214,16 +220,48 @@ fn write_batch(conn: &Connection, batch: &[Lookup]) -> Result<()> {
         tx.execute(
             "INSERT INTO devices (ip, first_seen, last_seen) VALUES (?1, ?2, ?2)
              ON CONFLICT(ip) DO UPDATE SET last_seen = excluded.last_seen",
-            (l.client.to_string(), l.ts),
+            (&client, l.ts),
         )?;
     }
     tx.commit()?;
     Ok(())
 }
 
-/// Learn MAC addresses for LAN devices from the ARP table, every 30s.
-fn arp_watcher(conn: Connection) {
+/// This machine's interface addresses, from ifconfig.
+fn interface_ips() -> HashSet<IpAddr> {
+    let mut ips = HashSet::new();
+    if let Ok(out) = Command::new("ifconfig").output() {
+        for line in String::from_utf8_lossy(&out.stdout).lines() {
+            let mut w = line.split_whitespace();
+            if let (Some("inet" | "inet6"), Some(addr)) = (w.next(), w.next()) {
+                if let Ok(ip) = addr.split('%').next().unwrap_or(addr).parse() {
+                    ips.insert(ip);
+                }
+            }
+        }
+    }
+    ips
+}
+
+fn computer_name() -> String {
+    Command::new("scutil")
+        .args(["--get", "ComputerName"])
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "This machine".into())
+}
+
+/// Every 30s: refresh this machine's addresses, and learn MACs for LAN devices from ARP.
+fn arp_watcher(conn: Connection, local_ips: Arc<Mutex<HashSet<IpAddr>>>) {
+    let _ = conn.execute(
+        "INSERT INTO devices (ip, label, first_seen, last_seen) VALUES (?1, ?2, ?3, ?3)
+         ON CONFLICT(ip) DO UPDATE SET label = COALESCE(label, excluded.label)",
+        (LOCAL, computer_name(), db::now()),
+    );
     loop {
+        *local_ips.lock().unwrap() = interface_ips();
         if let Ok(out) = Command::new("arp").args(["-a", "-n"]).output() {
             let text = String::from_utf8_lossy(&out.stdout);
             let _ = (|| -> Result<()> {
@@ -306,18 +344,14 @@ pub fn run(db_path: &Path, opts: Options) -> Result<()> {
         let conn = db::open(db_path, false)?;
         move || writer(conn, log_rx)
     });
+    let local_ips = Arc::new(Mutex::new(interface_ips()));
     std::thread::spawn({
         let conn = db::open(db_path, false)?;
-        move || arp_watcher(conn)
+        let local_ips = local_ips.clone();
+        move || arp_watcher(conn, local_ips)
     });
 
-    // The address the OS would use to reach the first upstream is our LAN address.
-    let local_ip = upstreams.first().and_then(|up| {
-        let s = UdpSocket::bind(if up.is_ipv4() { "0.0.0.0:0" } else { "[::]:0" }).ok()?;
-        s.connect(up).ok()?;
-        Some(s.local_addr().ok()?.ip())
-    });
-    let r = Arc::new(Resolver { upstreams, local_ip, cache: Mutex::new(Cache { entries: HashMap::new() }), log: log_tx });
+    let r = Arc::new(Resolver { upstreams, local_ips, cache: Mutex::new(Cache { entries: HashMap::new() }), log: log_tx });
     eprintln!(
         "netlog resolve: listening on {} (UDP+TCP), forwarding to {} — set the router's DNS to this machine",
         opts.listen,

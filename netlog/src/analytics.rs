@@ -437,7 +437,7 @@ pub fn schema(format: Format) {
             "country": "country", "lat": "latitude", "lon": "longitude"
         },
         "lookups (view — every DNS query from every LAN device; needs `netlog resolve`)": {
-            "ts": "unix seconds", "client": "device IP", "device": "label, else MAC, else IP",
+            "ts": "unix seconds", "client": "device IP, or 'local' for the machine running the resolver", "device": "label, else MAC, else IP",
             "qname": "name asked for", "qtype": "1=A, 28=AAAA, 65=HTTPS, 12=PTR ...",
             "rcode": "0=ok, 3=NXDOMAIN", "answers": "space-separated IPs", "cached": "1 if served from cache",
             "ms": "time to answer"
