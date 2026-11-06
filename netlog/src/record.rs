@@ -317,8 +317,9 @@ struct State {
     opens: Vec<Open>,
     /// (ip, local port, proto) -> when we last logged an open; QUIC repeats long headers.
     recent: HashMap<(IpAddr, u16, &'static str), Instant>,
-    /// (proto, local port) -> who opened it, from pktap; beats lsof because it never misses.
-    owners: HashMap<(&'static str, u16), (Owner, Instant)>,
+    /// (proto, local port) -> who opened it, from pktap, resolved the moment the packet was seen
+    /// (the process is certainly alive then; by the write tick a quick `curl` may be gone).
+    owners: HashMap<(&'static str, u16), (Resolved, Instant)>,
     apps: apps::Resolver,
     /// Process names already described in the `apps` table.
     apps_known: HashSet<String>,
@@ -328,26 +329,36 @@ struct State {
     chown_ticks: u8,
 }
 
+/// A pktap owner resolved to what gets recorded: the tagged process name, its app, and the app
+/// it was launched from.
+#[derive(Clone)]
+struct Resolved {
+    process: String,
+    info: Option<apps::AppInfo>,
+    via: Option<String>,
+}
+
 impl State {
     fn remember_owner(&mut self, o: Owner) {
         let now = Instant::now();
         if self.owners.len() > 5000 {
             self.owners.retain(|_, (_, t)| now.duration_since(*t) < Duration::from_secs(120));
         }
-        self.owners.insert((o.proto, o.local_port), (o, now));
+        let pid = o.epid.unwrap_or(o.pid);
+        let via = self.apps.via(pid);
+        let info = o.epid.and_then(|e| self.apps.for_pid(e)).or_else(|| self.apps.for_pid(o.pid));
+        let process = match &info {
+            Some(i) => self.apps.tagged_name(&i.process, pid),
+            None => o.comm.clone(), // exited already; the truncated kernel name is still a name
+        };
+        self.owners.insert((o.proto, o.local_port), (Resolved { process, info, via }, now));
     }
 
     /// The process name for an open: pktap's owner (resolved through its pid to the executable
     /// name lsof would report, preferring the app a system proxy acted for), else lsof's.
     fn attribute(&mut self, o: &Open, lsof: &PortOwners, pids: &HashMap<String, i32>) -> (String, Option<apps::AppInfo>, Option<String>) {
-        if let Some((owner, _)) = self.owners.get(&(o.proto, o.local_port)).cloned() {
-            let pid = owner.epid.unwrap_or(owner.pid);
-            let via = self.apps.via(pid);
-            let info = owner.epid.and_then(|e| self.apps.for_pid(e)).or_else(|| self.apps.for_pid(owner.pid));
-            return match info {
-                Some(i) => (self.apps.tagged_name(&i.process, pid), Some(i), via),
-                None => (owner.comm, None, via), // exited already; the truncated kernel name is still a name
-            };
+        if let Some((r, _)) = self.owners.get(&(o.proto, o.local_port)).cloned() {
+            return (r.process, r.info, r.via);
         }
         match lsof.get(&(o.proto.to_string(), o.local_port)).cloned() {
             Some(name) => {
