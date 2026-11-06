@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>netmap</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script src="vendor/topojson-client.min.js"></script>
+<style>
+  :root { --bg:#111418; --panel:#171b21; --line:#262c35; --text:#d8dee6; --dim:#7d8794; --accent:#4fd1c5; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--text);
+               font: 13px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; }
+  body { display:flex; }
+  aside { width:340px; flex:none; background:var(--panel); border-right:1px solid var(--line);
+          overflow-y:auto; padding:16px 16px 32px; }
+  #map { flex:1; background:#0c1117; }
+  h1 { font-size:18px; margin:0 0 2px; letter-spacing:.3px; }
+  h1 span { color:var(--accent); }
+  h2 { font-size:11px; text-transform:uppercase; letter-spacing:.8px; color:var(--dim);
+       margin:20px 0 6px; font-weight:600; }
+  .sub { color:var(--dim); margin-bottom:12px; }
+  .stats { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+  .stat { background:#1d222a; border:1px solid var(--line); border-radius:8px; padding:8px 10px; }
+  .stat b { display:block; font-size:20px; font-variant-numeric:tabular-nums; }
+  .stat small { color:var(--dim); }
+  .seg { display:flex; gap:4px; margin-top:12px; }
+  .seg button { flex:1; background:#1d222a; color:var(--text); border:1px solid var(--line);
+                border-radius:6px; padding:5px 0; cursor:pointer; font:inherit; }
+  .seg button.on { background:var(--accent); color:#0b0d10; border-color:var(--accent); font-weight:600; }
+  ul { list-style:none; margin:0; padding:0; }
+  li.row { display:flex; align-items:center; gap:8px; padding:4px 6px; border-radius:6px; cursor:pointer; }
+  li.row:hover { background:#1f252d; }
+  li.row.sel { background:#24303a; outline:1px solid var(--accent); }
+  .dot { width:9px; height:9px; border-radius:50%; flex:none; }
+  .live { box-shadow:0 0 0 3px rgba(79,209,197,.25); }
+  .name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .n { color:var(--dim); font-variant-numeric:tabular-nums; }
+  .feed li { padding:3px 0; border-bottom:1px solid var(--line); color:var(--dim); }
+  .feed b { color:var(--text); font-weight:500; }
+  .muted { color:var(--dim); }
+  .reset { margin-top:24px; background:none; border:1px solid var(--line); color:var(--dim);
+           border-radius:6px; padding:5px 10px; cursor:pointer; font:inherit; }
+  .leaflet-popup-content-wrapper, .leaflet-popup-tip { background:var(--panel); color:var(--text); }
+  .leaflet-popup-content { margin:10px 12px; min-width:260px; }
+  .pop h3 { margin:0 0 6px; font-size:13px; }
+  .pop table { border-collapse:collapse; width:100%; }
+  .pop td { padding:2px 6px 2px 0; vertical-align:top; font-size:12px; }
+  .pop td.h { max-width:220px; overflow-wrap:anywhere; }
+  .leaflet-container a { color:var(--accent); }
+  .live-feed li { display:flex; gap:6px; align-items:baseline; animation: flashIn 1.2s ease-out; }
+  .live-feed li .name { color:var(--text); }
+  .live-feed li .t { margin-left:auto; color:var(--dim); font-variant-numeric:tabular-nums; flex:none; }
+  @keyframes flashIn { from { background:rgba(79,209,197,.22); } to { background:transparent; } }
+  .world-btn { background:var(--panel); color:var(--text); border:1px solid var(--line); border-radius:6px;
+               padding:5px 10px; font:inherit; cursor:pointer; box-shadow:0 1px 4px rgba(0,0,0,.4); }
+  .world-btn:hover { border-color:var(--accent); }
+</style>
+</head>
+<body>
+<aside>
+  <h1>net<span>map</span></h1>
+  <div class="sub" id="home">Where this laptop is calling</div>
+  <div class="stats">
+    <div class="stat"><b id="s-dest">0</b><small>destinations</small></div>
+    <div class="stat"><b id="s-proc">0</b><small>apps</small></div>
+    <div class="stat"><b id="s-live">0</b><small>live now</small></div>
+  </div>
+  <div class="seg" id="window">
+    <button data-w="live">Live</button><button data-w="900">15m</button>
+    <button data-w="3600">1h</button><button data-w="all" class="on">All</button>
+  </div>
+
+  <h2>Live <span class="muted" id="rate"></span></h2>
+  <ul class="feed live-feed" id="live"><li class="muted">Waiting for new connections…</li></ul>
+
+  <h2>Apps <span class="muted" id="proc-hint"></span></h2>
+  <ul id="procs"></ul>
+
+  <h2>Who they talk to</h2>
+  <ul id="orgs"></ul>
+
+  <h2>Newest destinations</h2>
+  <ul class="feed" id="feed"></ul>
+
+  <h2>No location</h2>
+  <div class="muted" id="unknown">–</div>
+
+  <button class="reset" id="reset">Clear history</button>
+</aside>
+<div id="map"></div>
+
+<script>
+const state = { data: null, win: 'all', proc: null };
+const layers = new Map();   // location key -> { marker, arc }
+let homeMarker = null;
+
+// Whole-world view: one copy of the world, filling the window, no panning off the edge.
+const WORLD = [[-58, -180], [78, 180]];
+const map = L.map('map', {
+  zoomControl: false, zoomSnap: 0.1, zoomDelta: 0.5,
+  maxBounds: [[-85, -180], [85, 180]], maxBoundsViscosity: 1,
+});
+function showWorld() {
+  map.setMinZoom(0);
+  map.fitBounds(WORLD, { animate: false });
+  map.setMinZoom(map.getZoom());
+}
+showWorld();
+window.addEventListener('resize', () => { map.invalidateSize(); showWorld(); });
+L.control.zoom({ position: 'topright' }).addTo(map);
+const WorldButton = L.Control.extend({
+  onAdd() {
+    const b = L.DomUtil.create('button', 'world-btn');
+    b.textContent = 'World';
+    b.title = 'Show the whole world';
+    L.DomEvent.on(b, 'click', e => { L.DomEvent.stop(e); showWorld(); });
+    return b;
+  },
+});
+new WorldButton({ position: 'topright' }).addTo(map);
+// Countries drawn locally from Natural Earth (no tile server, no API key, no third-party requests).
+map.attributionControl.addAttribution('<a href="https://www.naturalearthdata.com/">Natural Earth</a> · <a href="https://db-ip.com">IP Geolocation by DB-IP</a>');
+map.createPane('countries').style.zIndex = 200;
+fetch('vendor/countries-110m.json').then(r => r.json()).then(topo => {
+  const world = topojson.feature(topo, topo.objects.countries);
+  // Drop Antarctica, and unwrap rings that cross the 180° line (Russia, Fiji) so they
+  // don't draw as stripes across the whole map.
+  world.features = world.features.filter(f => f.properties.name !== 'Antarctica');
+  const unwrap = ring => {
+    for (let i = 1; i < ring.length; i++) {
+      const d = ring[i][0] - ring[i - 1][0];
+      if (d > 180) ring[i][0] -= 360; else if (d < -180) ring[i][0] += 360;
+    }
+  };
+  for (const f of world.features) {
+    const polys = f.geometry.type === 'Polygon' ? [f.geometry.coordinates] : f.geometry.coordinates;
+    polys.forEach(p => p.forEach(unwrap));
+  }
+  L.geoJSON(world, {
+    pane: 'countries', interactive: false,
+    style: { color: '#2b3540', weight: 0.7, fillColor: '#1a2129', fillOpacity: 1 },
+  }).addTo(map);
+});
+
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function color(name) {
+  let h = 0;
+  for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return `hsl(${h % 360}, 70%, 62%)`;
+}
+function ago(sec) {
+  if (sec < 60) return `${Math.round(sec)}s ago`;
+  if (sec < 3600) return `${Math.round(sec / 60)}m ago`;
+  return `${Math.round(sec / 3600)}h ago`;
+}
+function place(c) { return [c.city, c.region, c.country].filter(Boolean).join(', ') || 'Unknown'; }
+
+// Curved arc from a to b as a quadratic Bézier sampled into points.
+function arcPoints(a, b) {
+  const [x1, y1, x2, y2] = [a[1], a[0], b[1], b[0]];
+  const dx = x2 - x1, dy = y2 - y1, d = Math.hypot(dx, dy) || 1;
+  const cx = (x1 + x2) / 2 - dy * 0.2, cy = (y1 + y2) / 2 + dx * 0.2;
+  const pts = [];
+  for (let t = 0; t <= 1.0001; t += 0.05) {
+    const u = 1 - t;
+    pts.push([u*u*y1 + 2*u*t*cy + t*t*y2, u*u*x1 + 2*u*t*cx + t*t*x2]);
+  }
+  return pts;
+}
+
+function render() {
+  const d = state.data; if (!d) return;
+  const liveSec = d.interval * 3 + 1;
+  const win = state.win === 'live' ? liveSec : state.win === 'all' ? Infinity : +state.win;
+  const isLive = c => d.now - c.last_seen <= liveSec;
+  const inWin = d.connections.filter(c => d.now - c.last_seen <= win);
+  const conns = state.proc ? inWin.filter(c => c.process === state.proc) : inWin;
+
+  // Stats
+  const ips = new Set(conns.map(c => c.ip));
+  document.getElementById('s-dest').textContent = ips.size;
+  document.getElementById('s-proc').textContent = new Set(inWin.map(c => c.process)).size;
+  document.getElementById('s-live').textContent = new Set(conns.filter(isLive).map(c => c.ip)).size;
+  document.getElementById('home').textContent = [d.home?.label, `names: ${d.sniffer}`].filter(Boolean).join(' · ');
+
+  // Group by location
+  const groups = new Map(); const unknown = [];
+  for (const c of conns) {
+    if (c.lat == null) { unknown.push(c); continue; }
+    const key = `${c.lat.toFixed(2)},${c.lon.toFixed(2)}`;
+    let g = groups.get(key);
+    if (!g) groups.set(key, g = { lat: c.lat, lon: c.lon, place: place(c), conns: [], ips: new Set(), live: false, procs: {} });
+    g.conns.push(c); g.ips.add(c.ip); g.live ||= isLive(c);
+    g.procs[c.process] = (g.procs[c.process] || 0) + c.samples;
+  }
+
+  // Map layers: update in place so open popups survive refreshes.
+  for (const [key, l] of layers) if (!groups.has(key)) { l.marker.remove(); l.arc?.remove(); layers.delete(key); }
+  for (const [key, g] of groups) {
+    const top = Object.entries(g.procs).sort((a, b) => b[1] - a[1])[0][0];
+    const col = color(top);
+    const radius = 4 + 3 * Math.sqrt(g.ips.size);
+    const style = { color: col, fillColor: col, fillOpacity: g.live ? 0.85 : 0.35, opacity: g.live ? 1 : 0.5, weight: g.live ? 2 : 1 };
+    let l = layers.get(key);
+    if (!l) {
+      l = { marker: L.circleMarker([g.lat, g.lon], { radius, ...style }).addTo(map).bindPopup('', { maxWidth: 420 }) };
+      if (d.home) l.arc = L.polyline(arcPoints([d.home.lat, d.home.lon], [g.lat, g.lon]), { interactive: false }).addTo(map);
+      layers.set(key, l);
+    }
+    l.marker.setRadius(radius).setStyle(style);
+    l.arc?.setStyle({ color: col, weight: g.live ? 1.6 : 0.8, opacity: g.live ? 0.8 : 0.18, dashArray: g.live ? null : '3 5' });
+    l.marker.setPopupContent(popup(g, isLive));
+  }
+
+  if (d.home && !homeMarker) {
+    homeMarker = L.circleMarker([d.home.lat, d.home.lon], { radius: 6, color: '#fff', fillColor: '#4fd1c5', fillOpacity: 1, weight: 2 })
+      .addTo(map).bindTooltip(d.home.label);
+  }
+
+  renderSidebar(inWin, conns, unknown, isLive, d.now);
+}
+
+function popup(g, isLive) {
+  const byIp = new Map();
+  for (const c of g.conns) {
+    let r = byIp.get(c.ip);
+    if (!r) byIp.set(c.ip, r = { ...c, procs: new Set(), ports: new Set(), live: false });
+    r.procs.add(c.process); r.ports.add(`${c.port}/${c.proto}`); r.live ||= isLive(c);
+  }
+  const rows = [...byIp.values()].sort((a, b) => b.live - a.live || b.last_seen - a.last_seen).slice(0, 30);
+  return `<div class="pop"><h3>${esc(g.place)} <span class="muted">· ${g.ips.size} IP${g.ips.size > 1 ? 's' : ''}</span></h3><table>` +
+    rows.map(r => `<tr><td><span class="dot ${r.live ? 'live' : ''}" style="display:inline-block;background:${color([...r.procs][0])}"></span></td>
+      <td class="h"><b>${esc(r.names[0] || r.hostname || r.ip)}</b>${r.names.length > 1 ? `<br>${r.names.slice(1).map(esc).join('<br>')}` : ''}<br><span class="muted">${esc(r.org || '')} · ${esc(r.ip)}${r.names.length && r.hostname ? ' · ' + esc(r.hostname) : ''}</span></td>
+      <td>${[...r.procs].map(esc).join('<br>')}<br><span class="muted">${[...r.ports].map(esc).join(' ')}</span></td></tr>`).join('') +
+    `</table>${byIp.size > 30 ? `<div class="muted">…and ${byIp.size - 30} more</div>` : ''}</div>`;
+}
+
+function renderSidebar(inWin, conns, unknown, isLive, now) {
+  // Apps (always from the unfiltered window so you can switch between them)
+  const procs = new Map();
+  for (const c of inWin) {
+    let p = procs.get(c.process);
+    if (!p) procs.set(c.process, p = { ips: new Set(), live: false });
+    p.ips.add(c.ip); p.live ||= isLive(c);
+  }
+  document.getElementById('proc-hint').textContent = state.proc ? '· click again to show all' : '· click to filter';
+  document.getElementById('procs').innerHTML = [...procs].sort((a, b) => b[1].ips.size - a[1].ips.size).map(([name, p]) =>
+    `<li class="row ${state.proc === name ? 'sel' : ''}" data-proc="${esc(name)}">
+       <span class="dot ${p.live ? 'live' : ''}" style="background:${color(name)}"></span>
+       <span class="name">${esc(name)}</span><span class="n">${p.ips.size}</span></li>`).join('') || '<li class="muted">Waiting for connections…</li>';
+
+  // Orgs
+  const orgs = new Map();
+  for (const c of conns) {
+    const k = c.org || 'Unknown network';
+    if (!orgs.has(k)) orgs.set(k, new Set());
+    orgs.get(k).add(c.ip);
+  }
+  const maxOrg = Math.max(1, ...[...orgs.values()].map(s => s.size));
+  document.getElementById('orgs').innerHTML = [...orgs].sort((a, b) => b[1].size - a[1].size).slice(0, 12).map(([name, s]) =>
+    `<li class="row" style="cursor:default;background:linear-gradient(90deg,#22303a ${100 * s.size / maxOrg}%,transparent 0)">
+       <span class="name">${esc(name)}</span><span class="n">${s.size}</span></li>`).join('');
+
+  // Newest destinations
+  const seen = new Map();
+  for (const c of conns) if (!seen.has(c.ip) || c.first_seen < seen.get(c.ip).first_seen) seen.set(c.ip, c);
+  document.getElementById('feed').innerHTML = [...seen.values()].sort((a, b) => b.first_seen - a.first_seen).slice(0, 12).map(c =>
+    `<li><b>${esc(c.process)}</b> → ${esc(c.names[0] || c.org || c.hostname || c.ip)} <span>· ${esc(c.city || c.country || '?')} · ${ago(now - c.first_seen)}</span></li>`).join('');
+
+  const unk = [...new Set(unknown.map(c => `${c.process} → ${c.ip}`))];
+  document.getElementById('unknown').innerHTML = unk.length ? unk.slice(0, 20).map(esc).join('<br>') : 'None';
+}
+
+document.getElementById('procs').addEventListener('click', e => {
+  const li = e.target.closest('[data-proc]'); if (!li) return;
+  state.proc = state.proc === li.dataset.proc ? null : li.dataset.proc;
+  render();
+});
+document.getElementById('window').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  state.win = b.dataset.w;
+  document.querySelectorAll('#window button').forEach(x => x.classList.toggle('on', x === b));
+  render();
+});
+document.getElementById('reset').addEventListener('click', async () => {
+  if (!confirm('Clear all recorded connections?')) return;
+  await fetch('/api/reset', { method: 'POST' });
+  poll();
+});
+
+// --- real time: one message per connection open, pushed from the server --------
+const live = [];
+let flashing = 0, pollTimer = null;
+function schedulePoll() {
+  if (!pollTimer) pollTimer = setTimeout(() => { pollTimer = null; poll(); }, 500);
+}
+function renderLive() {
+  const now = Date.now() / 1000;
+  const perMin = live.filter(e => now - e.ts < 60).length;
+  document.getElementById('rate').textContent = live.length ? `· ${perMin}${perMin >= 30 ? '+' : ''} in the last minute` : '';
+  if (!live.length) return;
+  document.getElementById('live').innerHTML = live.slice(0, 8).map(e =>
+    `<li data-id="${e.id}"><span class="dot" style="background:${color(e.app)}"></span>
+       <span class="name"><b>${esc(e.app)}</b> → ${esc(e.host || e.org || e.ip)}</span>
+       <span class="t">${ago(Math.max(0, now - e.ts))}</span></li>`).join('');
+}
+function flash(e) {
+  const home = state.data?.home;
+  if (e.lat == null || flashing > 25 || (state.proc && e.app !== state.proc)) return;
+  flashing++;
+  const col = color(e.app);
+  let arc = null;
+  if (home) {
+    // Draw the arc from here to the destination, then fade it.
+    arc = L.polyline(arcPoints([home.lat, home.lon], [e.lat, e.lon]), { color: col, weight: 2.5, opacity: 0.95, interactive: false }).addTo(map);
+    const el = arc.getElement(), len = el.getTotalLength();
+    el.style.strokeDasharray = `${len}`;
+    el.style.strokeDashoffset = `${len}`;
+    el.getBoundingClientRect();
+    el.style.transition = 'stroke-dashoffset .7s ease-out, opacity .6s ease .9s';
+    el.style.strokeDashoffset = '0';
+    el.style.opacity = '0';
+  }
+  // Ripple at the destination as the arc lands.
+  const ring = L.circleMarker([e.lat, e.lon], { radius: 3, color: col, weight: 2, fill: false, interactive: false }).addTo(map);
+  const start = performance.now() + (home ? 600 : 0);
+  const step = now => {
+    const k = (now - start) / 900;
+    if (k >= 1) { ring.remove(); arc?.remove(); flashing--; return; }
+    if (k > 0) { ring.setRadius(3 + 22 * k); ring.setStyle({ opacity: 1 - k }); }
+    requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+const stream = new EventSource('/api/stream');
+stream.onmessage = m => {
+  const e = JSON.parse(m.data);
+  live.unshift(e);
+  live.splice(60);
+  renderLive();
+  flash(e);
+  schedulePoll();
+};
+setInterval(renderLive, 5000);
+
+async function poll() {
+  try {
+    state.data = await (await fetch('/api/data')).json();
+    render();
+  } catch (e) { console.warn('poll failed', e); }
+}
+poll();
+setInterval(poll, 3000);
+</script>
+</body>
+</html>
