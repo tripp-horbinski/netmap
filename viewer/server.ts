@@ -19,6 +19,8 @@ import { FindingsDb } from "./findings";
 import { CompaniesDb } from "./companies";
 import { AppReportDb } from "./appreport";
 import { appName as productName } from "./appname";
+import { classifyHost } from "./classify";
+import type { Load } from "./sites";
 import { Tracer, isIp } from "./trace";
 
 const COMPILED = import.meta.dir.startsWith("/$bunfs");
@@ -135,6 +137,15 @@ function stream(): Response {
   return new Response(body, {
     headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-store" },
   });
+}
+
+/** Tag a load's hosts and requests with what they are to the site (first party = the site's own domain). */
+function classifyLoad(l: Load | null): Load | null {
+  if (!l) return l;
+  const own = new Set([l.site]);
+  for (const h of l.hits) h.cls = classifyHost(h.name, h.org, own);
+  for (const r of l.requests ?? []) r.cls = classifyHost(r.name, r.org, own);
+  return l;
 }
 
 function windowOf(req: Request): string {
@@ -295,6 +306,16 @@ const server = Bun.serve({
       },
     },
     "/api/sites/graph": { GET: (req) => withWindow((w) => sites.graph(w, browsersOnly(req)))(req) },
+    "/api/sites/:site/load/:start": {
+      GET: (req) => {
+        try {
+          const l = classifyLoad(sites.load(decodeURIComponent(req.params.site), Number(req.params.start), windowOf(req), browsersOnly(req)));
+          return l ? json(l) : json({ error: "no such load" }, 404);
+        } catch (e) {
+          return json({ error: String(e instanceof Error ? e.message : e) }, 400);
+        }
+      },
+    },
     "/api/sites/known": {
       GET: () => json(sites.known()),
       POST: async (req) => {
@@ -307,6 +328,7 @@ const server = Bun.serve({
       GET: (req) => {
         try {
           const detail = sites.site(decodeURIComponent(req.params.site), windowOf(req), browsersOnly(req));
+          if (detail) classifyLoad(detail.latest);
           return detail ? json(detail) : json({ error: "no loads of that site in this window" }, 404);
         } catch (e) {
           return json({ error: String(e instanceof Error ? e.message : e) }, 400);

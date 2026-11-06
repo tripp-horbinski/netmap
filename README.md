@@ -80,7 +80,11 @@ from `netlog/src/trackers.rs` and `db.rs` in `viewer/trackers.ts`; change both t
 new connections from one app (3 s of quiet or 20 s ends it, and a `www.` host of another site
 starts a new one); the site is the first name in the burst that is not a tracker, browser
 plumbing, a CDN or a bare IP, and everything else in the burst is attributed to it. The page shows
-a waterfall of the richest recent load plus the hosts, companies and trackers across all loads.
+a trace of the richest recent load (or any load you pick from the list) plus the hosts, companies and
+trackers across all loads. With the extension the trace is a Gantt: every request as a bar from start
+to finish, grouped by company, colored by what the host is to the site, with a time ruler, sizes and
+status on hover, and a summary of when first-party work finished and how long trackers kept going.
+Heuristic loads only know when each host first appeared, so they draw ticks instead of bars.
 Browsers only by default; `?apps=all` includes CLIs and daemons. The lists of plumbing and
 never-a-root domains live in `viewer/sites.ts`. API: `GET /api/sites?since=24h`,
 `GET /api/sites/DOMAIN?since=24h`. Known limits: connections a browser kept open from an earlier
@@ -146,8 +150,8 @@ land in a `browser_requests` table in `data/netmap.sqlite`.
 Install once: chrome://extensions, *Developer mode*, *Load unpacked*, pick `extension/`. From then on:
 
 - `/sites` uses the reported loads for Chrome instead of the heuristic (marked *exact*; other
-  browsers still use bursts), so a site's trace is what the tab really requested, with offsets from
-  the navigation.
+  browsers still use bursts), so a site's trace is what the tab really requested, with start and
+  end times, type, status and size per request (`GET /api/sites/SITE/load/START`).
 - The live feed and the map's feed show the page behind each Chrome connection
   ("Chrome · github.com → api.github.com"), including the ones `lsof` was too slow to name.
 - `GET /api/browser/status` says how much has been reported. The endpoint is configurable on the

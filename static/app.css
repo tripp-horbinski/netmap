@@ -301,6 +301,30 @@ svg.spark rect.now { fill: var(--text); }
 .list li.row.app { grid-template-columns: 26px 1fr 52px; }
 .list li.row.app .segbar { margin-top: 4px; }
 
+/* ---- gantt trace (site loads) ------------------------------------------------------------ */
+.gantt { max-width: 960px; font-size: 12px; }
+.gantt .ruler { display: grid; grid-template-columns: 300px 1fr 64px; gap: 10px; color: var(--dim); font-size: 10px; margin: 4px 0 2px; }
+.gantt .ruler .ticks { position: relative; height: 14px; border-bottom: 1px solid var(--line-2); }
+.gantt .ruler .ticks span { position: absolute; top: 0; transform: translateX(-50%); white-space: nowrap; }
+.gantt .ruler .ticks span:first-child { transform: none; } .gantt .ruler .ticks span:last-child { transform: translateX(-100%); }
+.gantt .grp { display: grid; grid-template-columns: 300px 1fr 64px; gap: 10px; align-items: center; padding: 6px 4px 2px; margin-top: 6px; border-top: 1px solid var(--line); }
+.gantt .grp .org { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gantt .grp .org small { color: var(--dim); font-weight: 400; margin-left: 6px; }
+.gantt .grp .track { position: relative; height: 6px; }
+.gantt .grp .track i { position: absolute; top: 0; height: 100%; border-radius: 3px; background: var(--line-2); }
+.gantt .r { display: grid; grid-template-columns: 300px 1fr 64px; gap: 10px; align-items: center; padding: 1px 4px; border-radius: 4px; }
+.gantt .r:hover { background: var(--panel-2); }
+.gantt .r .h { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-left: 10px; }
+.gantt .r .h small { color: var(--dim); margin-left: 6px; }
+.gantt .r .track { position: relative; height: 12px; background: repeating-linear-gradient(90deg, transparent 0 24.5%, var(--line) 24.5% 25%); }
+.gantt .r .track i { position: absolute; top: 2px; height: 8px; border-radius: 4px; min-width: 3px; }
+.gantt .r .track i.tick { width: 3px; min-width: 3px; top: 1px; height: 10px; border-radius: 1px; opacity: .9; }
+.gantt .r .track i.open { border-top-right-radius: 0; border-bottom-right-radius: 0; opacity: .55; }
+.gantt .ms { color: var(--dim); font-variant-numeric: tabular-nums; text-align: right; font-size: 11px; }
+.gantt .sum { color: var(--dim); font-size: 12px; margin: 4px 0 8px; }
+.gantt .sum b { color: var(--text); font-weight: 600; }
+.loadpick tr { cursor: pointer; } .loadpick tr.sel td { background: var(--accent-soft); }
+
 /* ---- app icons -------------------------------------------------------------------------- */
 .app-ic { position: relative; display: inline-grid; place-items: center; width: var(--s, 20px); height: var(--s, 20px);
           border-radius: 22%; background: var(--c, var(--line-2)); color: #fff; flex: none; vertical-align: middle; overflow: hidden; }

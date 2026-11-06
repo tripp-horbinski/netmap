@@ -71,7 +71,17 @@ export function isNeverRoot(name: string): boolean {
 
 export interface Open { id: number; ts: number; app: string; ip: string; name: string; org: string | null; country: string | null }
 
-export interface Hit { name: string; domain: string; org: string | null; country: string | null; tracker: boolean; offset: number; ip: string }
+export interface Hit {
+  name: string; domain: string; org: string | null; country: string | null; tracker: boolean; offset: number; ip: string;
+  /** From the Chrome extension only: when the first request to this host finished, its type, size and status. */
+  end_offset?: number | null; type?: string | null; bytes?: number | null; status?: number | null;
+  /** What the host is to the site (set by the API, see classify.ts). */
+  cls?: string;
+}
+/** One browser request in a load, from the extension: the trace view draws these. */
+export interface Request {
+  name: string; offset: number; end_offset: number | null; type: string; status: number | null; bytes: number | null; cached: boolean; org: string | null; cls?: string;
+}
 export interface Load {
   app: string; site: string;
   /** The host the load was rooted at, e.g. tripp.horbin.ski; `site` is its base domain. */
@@ -80,6 +90,8 @@ export interface Load {
   strong: boolean;
   /** Reported by the Chrome extension: the tab really was on this site. */
   exact?: boolean;
+  /** Every request of an exact load, in order; heuristic loads have none. */
+  requests?: Request[];
   start: number; end: number; hits: Hit[];
 }
 
@@ -106,7 +118,7 @@ export interface SiteDetail {
   orgs: { org: string; hosts: number; tracker: boolean }[];
   /** The richest of the ten most recent loads, so a one-host keep-alive ping does not hide the trace. */
   latest: Load | null;
-  loads: { start: number; app: string; hosts: number; trackers: number }[];
+  loads: { start: number; app: string; hosts: number; trackers: number; exact: boolean; span: number }[];
 }
 
 function nameOf(host: string | null, rdns: string | null, ip: string): string {
@@ -310,6 +322,11 @@ export class SitesDb {
     return buildGraph(this.loads(window, browsersOnly), new Set(this.known()));
   }
 
+  /** One load of a site, by its start time (as the detail's load list gives it). */
+  load(site: string, start: number, window: string, browsersOnly = false): Load | null {
+    return this.loads(window, browsersOnly).find((l) => l.site === site && Math.abs(l.start - start) < 1e-3) ?? null;
+  }
+
   site(site: string, window: string, browsersOnly = false): SiteDetail | null {
     const loads = this.loads(window, browsersOnly).filter((l) => l.site === site);
     if (!loads.length) return null;
@@ -335,7 +352,7 @@ export class SitesDb {
       orgs: [...orgMap.values()].sort((a, b) => b.hosts - a.hosts || a.org.localeCompare(b.org)),
       // The most telling recent load: the one with the most hosts among the last ten.
       latest: loads.slice(0, 10).reduce<Load | null>((best, l) => (!best || l.hits.length > best.hits.length ? l : best), null),
-      loads: loads.map((l) => ({ start: l.start, app: l.app, hosts: l.hits.length, trackers: l.hits.filter((h) => h.tracker).length })),
+      loads: loads.map((l) => ({ start: l.start, app: l.app, hosts: l.hits.length, trackers: l.hits.filter((h) => h.tracker).length, exact: !!l.exact, span: l.end - l.start })),
     };
   }
 }

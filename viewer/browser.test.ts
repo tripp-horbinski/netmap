@@ -26,7 +26,7 @@ describe("BrowserDb", () => {
     const b = fresh();
     b.ingest([
       { ts: T0, tab: 1, nav_ts: T0, site: "www.nytimes.com", host: "www.nytimes.com", type: "main_frame" },
-      { ts: T0 + 0.3, tab: 1, nav_ts: T0, site: "www.nytimes.com", host: "cdn.optimizely.com", type: "script", ip: "1.1.1.1" },
+      { ts: T0 + 0.3, tab: 1, nav_ts: T0, site: "www.nytimes.com", host: "cdn.optimizely.com", type: "script", ip: "1.1.1.1", end: T0 + 0.45, status: 200, bytes: 4096 },
       { ts: T0 + 0.5, tab: 1, nav_ts: T0, site: "www.nytimes.com", host: "stats.g.doubleclick.net", type: "xmlhttprequest" },
       { ts: T0 + 0.9, tab: 1, nav_ts: T0, site: "www.nytimes.com", host: "cdn.optimizely.com", type: "script" },   // repeat host
       { ts: T0 + 2, tab: 2, nav_ts: T0 + 2, site: "tripp.horbin.ski", host: "tripp.horbin.ski", type: "main_frame" },
@@ -40,6 +40,11 @@ describe("BrowserDb", () => {
     expect(nyt.hits[1]).toMatchObject({ name: "cdn.optimizely.com", org: "Cloudflare, Inc.", tracker: true }); // optimizely is on the tracker list
     expect(nyt.hits[1]!.offset).toBeCloseTo(0.3, 5);
     expect(nyt.hits[2]!.tracker).toBe(true);
+    expect(nyt.hits[1]).toMatchObject({ status: 200, bytes: 4096 });
+    expect(nyt.hits[1]!.end_offset).toBeCloseTo(0.45, 5);
+    expect(nyt.hits[2]!.end_offset).toBeNull();
+    expect(nyt.requests!.length).toBe(4); // every request, including the repeat to optimizely
+    expect(nyt.end).toBeCloseTo(T0 + 0.9, 5);
   });
 
   test("siteFor matches a host to the page that requested it within a few seconds", () => {

@@ -5,11 +5,12 @@
 import { Database } from "bun:sqlite";
 import type { Geo } from "./geo";
 import { baseDomain, isTracker } from "./trackers";
-import type { Hit, Load } from "./sites";
+import type { Hit, Load, Request } from "./sites";
 
 export interface BrowserRow {
   ts: number; tab: number; nav_ts: number | null; site: string | null; host: string;
   type: string; initiator: string | null; ip: string | null; cached: boolean;
+  end: number | null; status: number | null; bytes: number | null;
 }
 
 /** Requests with no tab (service workers, prefetch) group by site in spans this long. */
@@ -25,10 +26,15 @@ export class BrowserDb {
       type TEXT NOT NULL, initiator TEXT, ip TEXT, cached INTEGER NOT NULL DEFAULT 0)`);
     db.exec("CREATE INDEX IF NOT EXISTS browser_requests_ts ON browser_requests (ts)");
     db.exec("CREATE INDEX IF NOT EXISTS browser_requests_host ON browser_requests (host, ts)");
-    this.insertQ = db.query<void, [number, number, number | null, string | null, string, string, string | null, string | null, number]>(
-      "INSERT INTO browser_requests (ts, tab, nav_ts, site, host, type, initiator, ip, cached) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)");
+    // end time, status and size arrived later; add them to an existing table
+    const cols = new Set(db.query<{ name: string }, []>("PRAGMA table_info(browser_requests)").all().map((c) => c.name));
+    for (const [col, type] of [["end", "REAL"], ["status", "INTEGER"], ["bytes", "INTEGER"]] as const) {
+      if (!cols.has(col)) db.exec(`ALTER TABLE browser_requests ADD COLUMN ${col} ${type}`);
+    }
+    this.insertQ = db.query<void, [number, number, number | null, string | null, string, string, string | null, string | null, number, number | null, number | null, number | null]>(
+      "INSERT INTO browser_requests (ts, tab, nav_ts, site, host, type, initiator, ip, cached, end, status, bytes) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)");
     this.rowsQ = db.query<BrowserRow, [number]>(
-      "SELECT ts, tab, nav_ts, site, host, type, initiator, ip, cached FROM browser_requests WHERE ts >= ?1 AND site IS NOT NULL ORDER BY ts");
+      "SELECT ts, tab, nav_ts, site, host, type, initiator, ip, cached, end, status, bytes FROM browser_requests WHERE ts >= ?1 AND site IS NOT NULL ORDER BY ts");
     this.statusQ = db.query<{ rows: number; first: number | null; last: number | null }, []>(
       "SELECT COUNT(*) AS rows, MIN(ts) AS first, MAX(ts) AS last FROM browser_requests");
     this.siteForQ = db.query<{ site: string }, [string, number, number]>(
@@ -47,7 +53,8 @@ export class BrowserDb {
         if (typeof o.ts !== "number" || typeof o.host !== "string" || !o.host) continue;
         this.insertQ.run(o.ts, typeof o.tab === "number" ? o.tab : -1, typeof o.nav_ts === "number" ? o.nav_ts : null,
           typeof o.site === "string" ? o.site.toLowerCase() : null, o.host.toLowerCase(), typeof o.type === "string" ? o.type : "other",
-          typeof o.initiator === "string" ? o.initiator : null, typeof o.ip === "string" ? o.ip : null, o.cached ? 1 : 0);
+          typeof o.initiator === "string" ? o.initiator : null, typeof o.ip === "string" ? o.ip : null, o.cached ? 1 : 0,
+          typeof o.end === "number" ? o.end : null, typeof o.status === "number" ? o.status : null, typeof o.bytes === "number" ? o.bytes : null);
         n++;
       }
     });
@@ -87,16 +94,22 @@ export class BrowserDb {
       const start = rows[0]!.nav_ts ?? rows[0]!.ts;
       const seen = new Set<string>();
       const hits: Hit[] = [];
+      // One hit per host (the dependency view), but the trace keeps every request: hosts carry
+      // their first request's timing, and `requests` lists them all.
+      const requests: Request[] = [];
       for (const r of rows) {
-        if (seen.has(r.host)) continue;
-        seen.add(r.host);
         const key = r.ip ?? "";
         const info = orgCache.get(key) ?? orgCache.set(key, this.orgOf(r.ip)).get(key)!;
+        const req: Request = { name: r.host, offset: Math.max(0, r.ts - start), end_offset: r.end != null ? Math.max(0, r.end - start) : null,
+                               type: r.type, status: r.status, bytes: r.bytes, cached: r.cached, org: info.org };
+        requests.push(req);
+        if (seen.has(r.host)) continue;
+        seen.add(r.host);
         hits.push({ name: r.host, domain: baseDomain(r.host), org: info.org, country: info.country,
-                    tracker: isTracker(r.host), offset: Math.max(0, r.ts - start), ip: r.ip ?? "" });
+                    tracker: isTracker(r.host), offset: req.offset, ip: r.ip ?? "", end_offset: req.end_offset, type: r.type, bytes: r.bytes, status: r.status });
       }
-      out.push({ app: "Chrome", site: baseDomain(root), root, strong: true, exact: true,
-                 start, end: rows[rows.length - 1]!.ts, hits });
+      const end = Math.max(rows[rows.length - 1]!.ts, ...rows.map((r) => r.end ?? 0));
+      out.push({ app: "Chrome", site: baseDomain(root), root, strong: true, exact: true, start, end, hits, requests });
     }
     return out.sort((a, b) => b.start - a.start);
   }

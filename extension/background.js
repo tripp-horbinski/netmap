@@ -6,7 +6,8 @@
 // browser netlog only sees "Google Chrome Helper". This is the inside view it cannot get.
 
 const DEFAULT_ENDPOINT = 'http://127.0.0.1:8765/api/browser/requests';
-const FLUSH_MS = 1500;      // how long a request waits in the buffer so onCompleted can add its IP
+const FLUSH_MS = 1500;      // how long a request waits in the buffer so onCompleted can add its IP and end time
+const HOLD_S = 10;          // an unfinished request is sent after this long with no end time
 
 const tabs = new Map();     // tabId -> { url, host, navTs }
 const buffer = new Map();   // requestId -> record
@@ -36,20 +37,30 @@ chrome.webRequest.onBeforeRequest.addListener((d) => {
   const site = d.type === 'main_frame' ? host : tab?.host ?? hostOf(d.initiator ?? '') ?? null;
   buffer.set(d.requestId, {
     ts: d.timeStamp / 1000, tab: d.tabId, nav_ts: d.type === 'main_frame' ? d.timeStamp / 1000 : tab?.navTs ?? null,
-    site, host, type: d.type, initiator: hostOf(d.initiator ?? ''), ip: null, cached: false,
+    site, host, type: d.type, initiator: hostOf(d.initiator ?? ''), ip: null, cached: false, end: null, status: null, bytes: null,
   });
   if (!timer) timer = setTimeout(flush, FLUSH_MS);
 }, { urls: ['<all_urls>'] });
 
 chrome.webRequest.onCompleted.addListener((d) => {
   const r = buffer.get(d.requestId);
-  if (r) { r.ip = d.ip ?? null; r.cached = !!d.fromCache; }
+  if (!r) return;
+  r.ip = d.ip ?? null; r.cached = !!d.fromCache; r.end = d.timeStamp / 1000; r.status = d.statusCode;
+  const len = (d.responseHeaders ?? []).find((h) => h.name.toLowerCase() === 'content-length');
+  if (len) r.bytes = Number(len.value) || null;
+}, { urls: ['<all_urls>'] }, ['responseHeaders']);
+chrome.webRequest.onErrorOccurred.addListener((d) => {
+  const r = buffer.get(d.requestId);
+  if (r) { r.end = d.timeStamp / 1000; r.status = 0; }
 }, { urls: ['<all_urls>'] });
 
 async function flush() {
   timer = null;
-  const rows = [...buffer.values()];
-  buffer.clear();
+  // Send what has finished (or has waited long enough); keep the rest for their end time.
+  const now = Date.now() / 1000;
+  const rows = [];
+  for (const [id, r] of buffer) if (r.end != null || now - r.ts > HOLD_S) { rows.push(r); buffer.delete(id); }
+  if (buffer.size && !timer) timer = setTimeout(flush, FLUSH_MS);
   if (!rows.length) return;
   try {
     await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rows }) });

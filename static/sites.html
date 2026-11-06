@@ -53,7 +53,9 @@
 const { esc, fmtN, ago, ms, rows } = nm;
 const when = (ts) => nm.when(ts, true);
 const $ = (id) => document.getElementById(id);
-const state = { win: '24h', site: null, list: [], detail: null, q: '', graph: null, table: false };
+const state = { win: '24h', site: null, list: [], detail: null, q: '', graph: null, table: false, load: null, loadStart: null };
+const CLASSES = [['first-party', 'first party'], ['update', 'update check'], ['telemetry', 'telemetry'], ['ads', 'ads & tracking'], ['cdn', 'CDN / cloud'], ['other', 'other']];
+const fmtBytes = (b) => (b == null ? '' : b >= 1048576 ? `${(b / 1048576).toFixed(1)} MB` : b >= 1024 ? `${Math.round(b / 1024)} KB` : `${b} B`);
 nm.nav('/sites');
 nm.stream();
 
@@ -81,18 +83,42 @@ function renderList() {
 
 const tags = (h) => (h.first_party || h.domain === state.site ? '<span class="tag fp">first party</span>' : '') + (h.tracker ? '<span class="tag">tracker</span>' : '');
 
-function waterfall(load) {
+// Gantt of one load: every request as a bar from start to end (a tick when the end is unknown),
+// grouped by company, colored by what the host is to the site. Heuristic loads only know when each
+// host first appeared, so they draw ticks; exact loads from the extension draw full bars.
+function gantt(load) {
   if (!load) return '<div class="muted">No load recorded.</div>';
-  const span = Math.max(0.25, ...load.hits.map((h) => h.offset));
+  const rowsIn = load.requests?.length ? load.requests : load.hits.map((h) => ({ name: h.name, offset: h.offset, end_offset: h.end_offset ?? null, type: h.type ?? null, status: h.status ?? null, bytes: h.bytes ?? null, cached: false, org: h.org, cls: h.cls }));
+  const span = Math.max(0.25, ...rowsIn.map((r) => r.end_offset ?? r.offset));
+  const pct = (s) => (100 * s / span).toFixed(2) + '%';
+  const groups = new Map();
+  for (const r of rowsIn) { const k = r.org ?? 'Unknown network'; (groups.get(k) ?? groups.set(k, []).get(k)).push(r); }
+  const ordered = [...groups].sort((a, b) => Math.min(...a[1].map((r) => r.offset)) - Math.min(...b[1].map((r) => r.offset)));
+  const lastOf = (pred) => Math.max(0, ...rowsIn.filter(pred).map((r) => r.end_offset ?? r.offset));
+  const fpDone = lastOf((r) => r.cls === 'first-party'), trackersUntil = lastOf((r) => r.cls === 'ads' || r.cls === 'telemetry');
+  const bytes = rowsIn.reduce((n, r) => n + (r.bytes ?? 0), 0);
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => `<span style="left:${(100 * f).toFixed(0)}%">${ms(span * f)}</span>`).join('');
+  const bar = (r) => {
+    const cls = `c-${r.cls ?? 'other'}`;
+    const title = `${r.name} · ${r.type ?? ''}${r.status != null ? ` · ${r.status || 'failed'}` : ''}${r.bytes != null ? ` · ${fmtBytes(r.bytes)}` : ''}${r.cached ? ' · cached' : ''} · +${ms(r.offset)}${r.end_offset != null ? ` → +${ms(r.end_offset)} (${ms(r.end_offset - r.offset)})` : ' · end unknown'}`;
+    const shape = r.end_offset != null
+      ? `<i class="${cls}" style="left:${pct(r.offset)};width:${pct(Math.max(0.004 * span, r.end_offset - r.offset))}"></i>`
+      : `<i class="${cls} tick" style="left:${pct(r.offset)}"></i>`;
+    return `<div class="r" title="${esc(title)}"><div class="h">${esc(r.name)}<small>${esc(r.type ?? '')}${r.bytes != null ? ' · ' + fmtBytes(r.bytes) : ''}</small></div><div class="track">${shape}</div><div class="ms">${r.end_offset != null ? ms(r.end_offset - r.offset) : '+' + ms(r.offset)}</div></div>`;
+  };
   return `
-    <div class="muted">${when(load.start)} · ${esc(load.app)} · ${fmtN(load.hits.length)} hosts over ${ms(load.end - load.start)}</div>
-    <div class="legend"><span><i style="background:var(--text)"></i>first party</span><span><i style="background:var(--accent)"></i>third party</span><span><i style="background:var(--warn)"></i>tracker</span></div>
-    <div class="wf">${load.hits.map((h) => `
-      <div class="r" title="${esc(h.name)} · ${esc(h.org ?? 'unknown org')} · ${esc(h.country ?? '')} · +${ms(h.offset)}">
-        <div class="h">${esc(h.name)}<small>${esc(h.org ?? '')}</small></div>
-        <div class="track"><div class="bar${h.tracker ? ' t' : h.domain === load.site ? ' fp' : ''}" style="width:${Math.max(0.6, (100 * h.offset) / span).toFixed(1)}%"></div></div>
-        <div class="ms">+${ms(h.offset)}</div>
-      </div>`).join('')}</div>`;
+    <div class="sum"><b>${when(load.start)}</b> · ${esc(nm.appName(load.app))} · ${fmtN(rowsIn.length)} request${rowsIn.length === 1 ? '' : 's'} to ${fmtN(load.hits.length)} hosts over <b>${ms(span)}</b>${bytes ? ` · ${fmtBytes(bytes)}` : ''}
+      ${load.exact ? '<span class="tag fp">exact</span>' : '<span class="tag cls">heuristic · first appearance only</span>'}
+      ${fpDone ? ` · first party done at <b>${ms(fpDone)}</b>` : ''}${trackersUntil ? ` · trackers and telemetry until <b>${ms(trackersUntil)}</b>` : ''}</div>
+    <div class="legend">${CLASSES.map(([k, l]) => `<span><i class="c-${k}"></i>${l}</span>`).join('')}</div>
+    <div class="gantt">
+      <div class="ruler"><span>company / host</span><div class="ticks">${ticks}</div><span style="text-align:right">took</span></div>
+      ${ordered.map(([org, rs]) => {
+        const s = Math.min(...rs.map((r) => r.offset)), e = Math.max(...rs.map((r) => r.end_offset ?? r.offset));
+        const gb = rs.reduce((n, r) => n + (r.bytes ?? 0), 0);
+        return `<div class="grp"><div class="org">${esc(org)}<small>${rs.length} request${rs.length === 1 ? '' : 's'}${gb ? ' · ' + fmtBytes(gb) : ''}</small></div><div class="track"><i style="left:${pct(s)};width:${pct(Math.max(0.004 * span, e - s))}"></i></div><div class="ms">${ms(e - s)}</div></div>` + rs.map(bar).join('');
+      }).join('')}
+    </div>`;
 }
 
 // Sites left, companies right, one ribbon per (site, company) pair, width = third-party hosts.
@@ -159,8 +185,8 @@ function renderDetail() {
       <div class="tile"><div class="label">Companies</div><div class="value">${fmtN(s.orgs)}</div></div>
       <div class="tile"><div class="label">Tracker hosts</div><div class="value${s.trackers ? ' warn' : ''}">${fmtN(s.trackers)}</div></div>
     </div>
-    <h2>Latest load</h2>
-    ${waterfall(d.latest)}
+    <h2>Trace <span class="muted">${state.load && state.loadStart ? 'the load you picked' : 'the richest recent load'} · pick another below</span></h2>
+    ${gantt(state.load ?? d.latest)}
     <h2>Everything it pulls in <span class="muted">across ${fmtN(s.loads)} load${s.loads === 1 ? '' : 's'}</span></h2>
     ${rows(d.hosts, [
       { h: 'host', f: (r) => esc(r.name) + tags(r) + (r.first_party || r.tracker ? '' : ` <button class="btn small pin" data-name="${esc(r.name)}" title="This is a site I visited, not something ${esc(s.site)} pulled in">site?</button>`) },
@@ -174,13 +200,15 @@ function renderDetail() {
       { h: 'company', f: (r) => esc(r.org) + (r.tracker ? '<span class="tag">tracker</span>' : '') },
       { h: 'hosts', n: true, f: (r) => fmtN(r.hosts) },
     ], 'Nothing.')}
-    <h2>Loads</h2>
-    ${rows(d.loads.slice(0, 40), [
-      { h: 'when', f: (r) => when(r.start) },
+    <h2>Loads <span class="muted">click one to trace it</span></h2>
+    <div class="loadpick">${rows(d.loads.slice(0, 40), [
+      { h: 'when', f: (r) => `<span data-start="${r.start}">${when(r.start)}</span>` },
       { h: 'app', f: (r) => esc(nm.appName(r.app)) },
+      { h: 'took', n: true, f: (r) => ms(r.span) },
       { h: 'hosts', n: true, f: (r) => fmtN(r.hosts) },
       { h: 'trackers', n: true, f: (r) => fmtN(r.trackers) },
-    ], 'Nothing.')}
+      { h: '', f: (r) => (r.exact ? '<span class="tag fp">exact</span>' : '') },
+    ], 'Nothing.')}</div>
     <p class="note">A load is a burst of new connections from one app (3 s of quiet or 20 s ends it, and a www. or apex host
       of another site, or a pinned site, starts a new one); the site is the first name in the burst that is not a tracker,
       browser plumbing, a CDN or a bare IP. Connections a browser kept open from an earlier visit do not reappear, so a revisit
@@ -192,11 +220,21 @@ function renderDetail() {
   };
   $('back').onclick = () => { state.site = null; history.replaceState(null, '', ' '); refresh(); };
   $('pin-site').onclick = () => pin(s.site, !d.pinned);
+  for (const tr of $('main').querySelectorAll('.loadpick tbody tr')) {
+    const start = Number(tr.querySelector('[data-start]')?.dataset.start);
+    if (state.loadStart === start) tr.classList.add('sel');
+    tr.onclick = async () => {
+      state.loadStart = start;
+      state.load = await fetch(`/api/sites/${encodeURIComponent(s.site)}/load/${start}?since=${encodeURIComponent(state.win)}`).then((r) => (r.ok ? r.json() : null));
+      renderDetail();
+      $('main').scrollTo({ top: 0, behavior: 'smooth' });
+    };
+  }
   for (const b of $('main').querySelectorAll('button.pin')) b.onclick = () => pin(b.dataset.name, true);
 }
 
 async function select(site) {
-  state.site = site;
+  state.site = site; state.load = null; state.loadStart = null;
   history.replaceState(null, '', `#${encodeURIComponent(site)}`);
   await refresh();
 }
