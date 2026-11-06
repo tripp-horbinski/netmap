@@ -180,7 +180,7 @@ function render() {
   if (state.sites) {
     $('sites').innerHTML = sites.slice(0, 8).map((s) => `
       <a class="row" style="grid-template-columns:1fr 40px 40px" href="/sites#${encodeURIComponent(s.site)}">
-        <div class="name">${esc(s.site)}<small>${fmtN(s.loads)} load${s.loads === 1 ? '' : 's'} · ${ago(s.last)}</small></div>
+        <div class="name" title="${esc(s.site)}">${esc(s.label ?? s.site)}<small>${fmtN(s.loads)} load${s.loads === 1 ? '' : 's'} · ${ago(s.last)}</small></div>
         <div class="n" title="third-party hosts">${fmtN(s.third_party)}</div>
         <div class="n${s.trackers ? ' warn' : ''}" title="tracker hosts">${fmtN(s.trackers)}</div></a>`).join('')
       || '<li class="muted">No site loads in this window.</li>';

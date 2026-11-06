@@ -54,12 +54,12 @@ nm.stream();
 
 function renderList() {
   const q = state.q.toLowerCase();
-  const list = state.list.filter((s) => !q || s.site.includes(q));
+  const list = state.list.filter((s) => !q || s.site.includes(q) || s.label.includes(q));
   $('count').textContent = list.length ? `(${list.length})` : '';
   if (!list.length) { $('sites').innerHTML = '<li class="muted">No loads in this window.</li>'; return; }
   $('sites').innerHTML = list.map((s) => `
     <li class="row${s.site === state.site ? ' sel' : ''}" data-site="${esc(s.site)}">
-      <div class="name">${esc(s.site)}<small>${fmtN(s.loads)} load${s.loads === 1 ? '' : 's'} · ${ago(s.last)}</small></div>
+      <div class="name" title="${esc(s.site)}">${esc(s.label)}<small>${fmtN(s.loads)} load${s.loads === 1 ? '' : 's'} · ${ago(s.last)}</small></div>
       <div class="n" title="third-party hosts">${fmtN(s.third_party)}</div>
       <div class="n${s.trackers ? ' warn' : ''}" title="tracker hosts">${fmtN(s.trackers)}</div>
     </li>`).join('');
@@ -87,7 +87,7 @@ function renderDetail() {
   if (!d) { $('main').innerHTML = '<div class="empty">Pick a site.</div>'; return; }
   const s = d.summary;
   $('main').innerHTML = `
-    <div class="head"><h3>${esc(s.site)}</h3>${d.pinned ? '<span class="tag fp">pinned</span>' : ''}
+    <div class="head"><h3>${esc(s.label)}${s.label !== s.site ? ` <span class="muted">${esc(s.site)}</span>` : ''}</h3>${d.pinned ? '<span class="tag fp">pinned</span>' : ''}
       <button class="btn small" id="pin-site" title="${d.pinned ? 'Stop treating this as a site you visit' : 'Always treat this as a site you visit, even mid-burst'}">${d.pinned ? 'Unpin' : 'Pin as site'}</button></div>
     <div class="muted">${fmtN(s.loads)} load${s.loads === 1 ? '' : 's'} from ${s.apps.map(esc).join(', ')} · last ${ago(s.last)}</div>
     <div class="tiles">

@@ -73,13 +73,18 @@ export interface Open { id: number; ts: number; app: string; ip: string; name: s
 export interface Hit { name: string; domain: string; org: string | null; country: string | null; tracker: boolean; offset: number; ip: string }
 export interface Load {
   app: string; site: string;
+  /** The host the load was rooted at, e.g. tripp.horbin.ski; `site` is its base domain. */
+  root: string;
   /** The load began with a www. or apex host, so the site attribution is reliable. */
   strong: boolean;
   start: number; end: number; hits: Hit[];
 }
 
 export interface SiteSummary {
-  site: string; loads: number; last: number; apps: string[];
+  site: string;
+  /** What to call the site: the usual root host when it is a non-www subdomain (tripp.horbin.ski), else the base domain. */
+  label: string;
+  loads: number; last: number; apps: string[];
   hosts: number; third_party: number; trackers: number; orgs: number;
 }
 
@@ -154,7 +159,7 @@ function toLoad(app: string, opens: Open[]): Load | null {
     hits.push({ name: o.name, domain: baseDomain(o.name), org: o.org, country: o.country,
                 tracker: isTracker(o.name), offset: Math.max(0, o.ts - root.ts), ip: o.ip });
   }
-  return { app, site, strong, start: root.ts, end: opens[opens.length - 1]!.ts, hits };
+  return { app, site, root: root.name, strong, start: root.ts, end: opens[opens.length - 1]!.ts, hits };
 }
 
 function median(xs: number[]): number {
@@ -162,12 +167,14 @@ function median(xs: number[]): number {
   return s.length ? s[Math.floor(s.length / 2)]! : 0;
 }
 
-function summarize(site: string, loads: Load[]): SiteSummary {
+function summarize(site: string, loads: Load[], pinned: boolean): SiteSummary {
   const hosts = new Set<string>(), orgs = new Set<string>(), apps = new Set<string>();
   let third = 0, trackers = 0;
   const thirdSet = new Set<string>(), trackerSet = new Set<string>();
+  const roots = new Map<string, number>();
   for (const l of loads) {
     apps.add(l.app);
+    roots.set(l.root, (roots.get(l.root) ?? 0) + 1);
     for (const h of l.hits) {
       hosts.add(h.name);
       if (h.org) orgs.add(h.org);
@@ -176,7 +183,11 @@ function summarize(site: string, loads: Load[]): SiteSummary {
     }
   }
   third = thirdSet.size; trackers = trackerSet.size;
-  return { site, loads: loads.length, last: loads[0]!.start, apps: [...apps].sort(),
+  const top = [...roots].sort((a, b) => b[1] - a[1])[0]![0].toLowerCase();
+  // Only a pinned site gets its root host as the name; for the rest the base domain is the
+  // identity and the root is often a CDN node like rr10---sn-...googlevideo.com.
+  const label = !pinned || top === site || top === `www.${site}` ? site : top;
+  return { site, label, loads: loads.length, last: loads[0]!.start, apps: [...apps].sort(),
            hosts: hosts.size, third_party: third, trackers, orgs: orgs.size };
 }
 
@@ -224,14 +235,16 @@ export class SitesDb {
   sites(window: string, browsersOnly = false): SiteSummary[] {
     const bySite = new Map<string, Load[]>();
     for (const l of this.loads(window, browsersOnly)) (bySite.get(l.site) ?? bySite.set(l.site, []).get(l.site)!).push(l);
-    return [...bySite].map(([site, loads]) => summarize(site, loads))
+    const known = new Set(this.known());
+    return [...bySite].map(([site, loads]) => summarize(site, loads, known.has(site)))
       .sort((a, b) => b.third_party - a.third_party || b.loads - a.loads || a.site.localeCompare(b.site));
   }
 
   site(site: string, window: string, browsersOnly = false): SiteDetail | null {
     const loads = this.loads(window, browsersOnly).filter((l) => l.site === site);
     if (!loads.length) return null;
-    const summary = summarize(site, loads);
+    const pinned = this.known().includes(site);
+    const summary = summarize(site, loads, pinned);
     const acc = new Map<string, { h: Hit; offsets: number[] }>();
     for (const l of loads) for (const h of l.hits) {
       const a = acc.get(h.name) ?? acc.set(h.name, { h, offsets: [] }).get(h.name)!;
@@ -248,7 +261,7 @@ export class SitesDb {
       row.hosts += 1; row.tracker ||= h.tracker;
     }
     return {
-      summary, hosts, pinned: this.known().includes(site),
+      summary, hosts, pinned,
       orgs: [...orgMap.values()].sort((a, b) => b.hosts - a.hosts || a.org.localeCompare(b.org)),
       // The most telling recent load: the one with the most hosts among the last ten.
       latest: loads.slice(0, 10).reduce<Load | null>((best, l) => (!best || l.hits.length > best.hits.length ? l : best), null),
