@@ -257,7 +257,7 @@ function renderSidebar(inWin, conns, unknown, isLive, now) {
   // CLI tools sit under the app that launched them (via); the parent row filters to the whole group.
   const row = (g, depth) =>
     `<li class="row ${depth ? 'sub' : ''} ${state.proc === g.name ? 'sel' : ''}" style="--d:${depth}" data-proc="${esc(g.name)}">
-       ${nm.appIcon(g.name, { size: 18, live: g.live })}
+       ${nm.appIcon(g.name, { size: 18, live: g.live, cli: depth > 0 })}
        <span class="name">${esc(g.name)}</span><span class="n">${g.n}</span></li>`;
   const viaOf = nm.majorityVia(inWin);
   const tree = nm.groupByVia([...procs].map(([name, p]) => ({ name, n: p.ips.size, live: p.live, via: viaOf.get(name) ?? null })));
