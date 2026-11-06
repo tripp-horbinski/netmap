@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
-# Create a virtualenv and download the free DB-IP Lite databases (CC BY 4.0).
+# One-time setup: download the free DB-IP Lite databases (CC BY 4.0) into data/, then build
+# the netlog recorder and the Bun viewer.
 set -euo pipefail
 cd "$(dirname "$0")"
-
-[ -d .venv ] || python3 -m venv .venv
-.venv/bin/pip install -q maxminddb
 
 mkdir -p data
 fetch() {
@@ -23,4 +21,9 @@ fetch() {
 }
 fetch dbip-city-lite
 fetch dbip-asn-lite
-echo "ready: .venv/bin/python netmap.py"
+
+command -v cargo >/dev/null || { echo "need Rust (cargo) for netlog: https://rustup.rs" >&2; exit 1; }
+command -v bun >/dev/null || { echo "need Bun for the viewer: https://bun.sh" >&2; exit 1; }
+(cd netlog && cargo build --release)
+(cd viewer && bun install && bun run build)
+echo "ready: ./install-agents.sh   (or: netlog/target/release/netlog record &  then  cd viewer && bun run dev)"

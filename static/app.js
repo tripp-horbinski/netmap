@@ -119,6 +119,35 @@ window.nm = (() => {
     }).join('');
     return `<svg class="spark ${cls}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="${label} over time">${bars}</svg>`;
   }
+  /** Stacked bar sparkline: series = [{ name, bins, color }] over the same bins; legend below. */
+  function stackedSpark(series, win, { label = 'opens' } = {}) {
+    const n = series[0]?.bins.length ?? 0;
+    const totals = Array.from({ length: n }, (_, i) => series.reduce((t, s) => t + s.bins[i], 0));
+    const max = Math.max(1, ...totals);
+    const w = 100, h = 100, gap = 1.2, bw = w / n - gap;
+    let bars = '';
+    for (let i = 0; i < n; i++) {
+      let y = h;
+      const t0 = win.start + i * win.bin_seconds, t1 = t0 + win.bin_seconds;
+      const parts = series.filter((s) => s.bins[i]).map((s) => `${s.name} ${fmtN(s.bins[i])}`).join(', ');
+      for (const s of series) {
+        if (!s.bins[i]) continue;
+        const bh = (s.bins[i] / max) * h; y -= bh;
+        bars += `<rect x="${(i * (bw + gap)).toFixed(2)}" y="${y.toFixed(2)}" width="${bw.toFixed(2)}" height="${Math.max(0.5, bh - 0.6).toFixed(2)}" style="fill:${s.color}"><title>${fmtN(totals[i])} ${label} · ${when(t0)} – ${when(t1)}\n${esc(parts)}</title></rect>`;
+      }
+    }
+    const legend = series.map((s) => `<span><i class="dot" style="background:${s.color}"></i>${esc(s.name)}</span>`).join('');
+    return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="${label} over time by app">${bars}</svg><div class="chips">${legend}</div>`;
+  }
+  /** Signed change vs a named prior period; `upIsBad` colors a rise as a warning. */
+  function delta(cur, prev, period, upIsBad = false) {
+    if (prev == null || (!prev && !cur)) return '';
+    const pct = prev ? Math.round((100 * (cur - prev)) / prev) : null;
+    const dir = cur > prev ? 'up' : cur < prev ? 'down' : 'flat';
+    const cls = dir === 'flat' ? '' : (dir === 'up') === upIsBad ? 'bad' : 'good';
+    const txt = dir === 'flat' ? '±0' : `${dir === 'up' ? '▲' : '▼'} ${pct === null ? fmtN(Math.abs(cur - prev)) : Math.abs(pct) + '%'}`;
+    return `<span class="delta ${cls}" title="${fmtN(cur)} now vs ${fmtN(prev)} in the ${period} before">${txt} <small>vs prior ${period}</small></span>`;
+  }
   /** Bin timestamps into `n` equal bins ending now; returns { bins, window } like the devices API. */
   function binTimes(stamps, sinceSeconds, n = 24) {
     const now = Date.now() / 1000, start = now - sinceSeconds, bin_seconds = sinceSeconds / n;
@@ -145,5 +174,5 @@ window.nm = (() => {
   }
   const WINDOW_SECONDS = { '1h': 3600, '24h': 86400, '7d': 604800, all: Infinity };
 
-  return { esc, fmtN, compact, ago, when, ms, nav, stream, live, perMinute, spark, binTimes, rows, bars, segment, color, token, isDark, WINDOW_SECONDS, countryKey, mix, choroFill };
+  return { esc, fmtN, compact, ago, when, ms, nav, stream, live, perMinute, spark, binTimes, rows, bars, segment, color, token, isDark, WINDOW_SECONDS, countryKey, mix, choroFill, stackedSpark, delta };
 })();

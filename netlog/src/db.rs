@@ -1,4 +1,4 @@
-//! SQLite schema (shared with the Python map viewer), views and SQL helper functions.
+//! SQLite schema (read by the Bun viewer in ../viewer), views and SQL helper functions.
 
 use anyhow::{bail, Context, Result};
 use rusqlite::functions::FunctionFlags;
@@ -8,7 +8,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::trackers;
 
-/// Base tables. Must stay compatible with `netmap.py`, which creates the same ones.
+/// Base tables. The viewer (viewer/db.ts, lan.ts, sites.ts, trace.ts) reads these; change both together.
 const TABLES: &str = "
 CREATE TABLE IF NOT EXISTS conn (
   process TEXT NOT NULL, ip TEXT NOT NULL, port INTEGER NOT NULL, proto TEXT NOT NULL,

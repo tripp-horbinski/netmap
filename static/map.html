@@ -54,7 +54,7 @@
   </div>
 
   <div id="route-box" style="display:none">
-    <h2>Route <span class="muted" id="route-title"></span> <button class="btn small" id="route-clear">clear</button></h2>
+    <h2>Route <span class="muted" id="route-title"></span> <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:500">· bar = round trip</span> <button class="btn small" id="route-clear">clear</button></h2>
     <div class="route"><div class="sum muted" id="route-sum"></div><ul class="list" id="route"></ul></div>
   </div>
 
@@ -373,8 +373,9 @@ async function traceRoute(ip, fresh = false) {
   const silent = t.hops.filter(h => !h.ip).length;
   const place = h => h.private ? 'private' : h.city ? `${h.city}, ${h.country}` : h.country || 'no location';
   sum.innerHTML = `${t.hops.length} hops · ${placed.length} on the map · ${silent} silent · ${t.seconds.toFixed(1)} s · ${t.reached ? 'reached' : t.truncated ? 'gave up before the end' : 'incomplete'} · ${tracedAgo(t.ts)} <button class="btn small" id="route-again">again</button>`;
+  const maxRtt = Math.max(1, ...t.hops.map(h => h.rtt_ms ?? 0));
   list.innerHTML = t.hops.map(h => h.ip
-    ? `<li><span>${h.n}</span><span><b>${esc(h.rdns || h.ip)}</b>${h.rdns ? `<br>${esc(h.ip)}` : ''}<br>${esc(h.org || '')}${h.org ? ' · ' : ''}${esc(place(h))}</span><span class="ms">${h.rtt_ms.toFixed(1)} ms</span></li>`
+    ? `<li style="--w:${(100 * h.rtt_ms / maxRtt).toFixed(1)}%" title="round trip ${h.rtt_ms.toFixed(1)} ms"><span>${h.n}</span><span><b>${esc(h.rdns || h.ip)}</b>${h.rdns ? `<br>${esc(h.ip)}` : ''}<br>${esc(h.org || '')}${h.org ? ' · ' : ''}${esc(place(h))}</span><span class="ms">${h.rtt_ms.toFixed(1)} ms</span></li>`
     : `<li class="silent"><span>${h.n}</span><span>no answer</span><span class="ms">–</span></li>`).join('');
   document.getElementById('route-again').onclick = () => traceRoute(ip, true);
 }

@@ -215,7 +215,7 @@ pub fn suggest(conn: &Connection, window: &str) -> Result<Table> {
         }),
         None => out.push(Finding {
             score: 40, kind: "setup",
-            finding: "Data came from the Python viewer, not `netlog record`; recorder health unknown".into(),
+            finding: "No recorder heartbeat in the database; was this recorded by `netlog record`?".into(),
             run: "netlog status".into(),
         }),
         _ => {}

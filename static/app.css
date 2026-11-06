@@ -228,6 +228,15 @@ svg.spark rect.now { fill: var(--text); }
 .leaflet-tooltip { background: var(--panel); color: var(--text); border-color: var(--line); }
 .leaflet-tooltip-top:before { border-top-color: var(--line); }
 
+/* ---- deltas & stacked spark legend ------------------------------------------------------ */
+.delta { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--dim); white-space: nowrap; }
+.delta.good { color: var(--good); } .delta.bad { color: var(--warn); }
+.delta small { color: var(--dim); font-size: 11px; }
+.tile .delta { display: block; margin-top: 2px; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--dim); font-size: 11px; margin-top: 6px; }
+.chips .dot { width: 7px; height: 7px; margin-right: 4px; vertical-align: 0; }
+.route li { background: linear-gradient(90deg, var(--accent-soft) var(--w, 0%), transparent 0); }
+
 /* ---- choropleth ------------------------------------------------------------------------- */
 .leaflet-countries-pane path { cursor: default; }
 .choro { display: flex; align-items: center; gap: 6px; color: var(--dim); font-size: 11px; margin-top: 10px; }

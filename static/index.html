@@ -53,9 +53,11 @@ if (/^#trace=/.test(location.hash)) location.replace('/map' + location.hash);</s
 </div>
 
 <script>
-const { esc, fmtN, compact, ago, when, spark, binTimes, bars, color, token } = nm;
+const { esc, fmtN, compact, ago, when, spark, binTimes, bars, color, token, stackedSpark, delta } = nm;
+// The window of the same length just before the current one, for the deltas on the tiles.
+const PRIOR = { '1h': '2h', '24h': '48h', '7d': '14d' };
 const $ = (id) => document.getElementById(id);
-const state = { win: '24h', data: null, devices: null, sites: null };
+const state = { win: '24h', data: null, devices: null, sites: null, devices2: null, sites2: null };
 nm.nav('/');
 
 // ---- mini map: countries + one dot per place, no controls; click goes to the full map --------
@@ -108,11 +110,19 @@ function render() {
   const conns = d.connections.filter((c) => d.now - c.last_seen <= win);
   $('home').textContent = [d.home?.label, `names: ${d.sniffer}`].filter(Boolean).join(' · ');
 
-  // hero: opens per minute, from first_seen (polled every 3 s)
-  const opens = conns.map((c) => c.first_seen);
-  $('h-rate').textContent = fmtN(opens.filter((t) => d.now - t < 60).length);
-  const b = binTimes(opens, 900, 30);
-  $('h-spark').innerHTML = spark(b.bins, b.window, { label: 'opens' });
+  // hero: opens per minute from first_seen (polled every 3 s), stacked by app over 15 minutes
+  const recent = d.connections.filter((c) => d.now - c.first_seen < 900);
+  const lastMin = recent.filter((c) => d.now - c.first_seen < 60).length;
+  const prevMin = recent.filter((c) => d.now - c.first_seen >= 60 && d.now - c.first_seen < 120).length;
+  $('h-rate').textContent = fmtN(lastMin);
+  $('h-sub').innerHTML = `${delta(lastMin, prevMin, 'minute')} · last 15 minutes by app`;
+  const perApp = new Map();
+  for (const c of recent) (perApp.get(c.process) ?? perApp.set(c.process, []).get(c.process)).push(c.first_seen);
+  const ranked = [...perApp].sort((a, b) => b[1].length - a[1].length);
+  const topApps = ranked.slice(0, 4), rest = ranked.slice(4).flatMap(([, ts]) => ts);
+  const series = topApps.map(([name, ts]) => ({ name, color: color(name), ...binTimes(ts, 900, 30) }));
+  if (rest.length) series.push({ name: 'Other', color: token('--line-2'), ...binTimes(rest, 900, 30) });
+  $('h-spark').innerHTML = series.length ? stackedSpark(series.map((s) => ({ name: s.name, bins: s.bins, color: s.color })), series[0].window) : '<div class="muted">No opens in the last 15 minutes.</div>';
 
   // tiles
   const ips = new Set(conns.map((c) => c.ip)), apps = new Set(conns.map((c) => c.process));
@@ -121,18 +131,28 @@ function render() {
   const lookups = devs.reduce((n, x) => n + x.lookups, 0), trackers = devs.reduce((n, x) => n + x.tracker_lookups, 0);
   const pct = lookups ? Math.round((100 * trackers) / lookups) : 0;
   const sumBins = devs.length ? devs[0].bins.map((_, i) => devs.reduce((n, x) => n + x.bins[i], 0)) : null;
+  // prior-window figures: the doubled window minus the current one
+  // Only compare when the data reaches back a full prior window; before that a delta would just say
+  // "up from nothing".
+  const oldest = Math.min(Infinity, ...d.connections.map((c) => c.first_seen));
+  const prior = PRIOR[state.win] && d.now - oldest >= 2 * win ? PRIOR[state.win] : null;
+  const prevIps = prior ? new Set(d.connections.filter((c) => d.now - c.last_seen > win && d.now - c.last_seen <= 2 * win).map((c) => c.ip)).size : null;
+  const devs2 = state.devices2?.devices ?? null, sites2 = state.sites2 ?? null;
+  const prevTrackers = prior && devs2 ? devs2.reduce((n, x) => n + x.tracker_lookups, 0) - trackers : null;
+  const curLoads = sites.reduce((n, s) => n + s.loads, 0);
+  const prevLoads = prior && sites2 ? sites2.reduce((n, s) => n + s.loads, 0) - curLoads : null;
   const tile = (href, label, value, sub, extra = '', cls = '') =>
     `<a class="tile" href="${href}"><div class="label">${label}</div><div class="value ${cls}">${value}</div><div class="sub muted">${sub}</div>${extra}</a>`;
   $('tiles').innerHTML =
-    tile('/map', 'Destinations', compact(ips.size), `${fmtN(liveNow)} live now · ${fmtN(apps.size)} app${apps.size === 1 ? '' : 's'}`) +
+    tile('/map', 'Destinations', compact(ips.size), `${fmtN(liveNow)} live now · ${fmtN(apps.size)} app${apps.size === 1 ? '' : 's'}`, delta(ips.size, prevIps, state.win)) +
     (state.devices
       ? tile('/devices', 'LAN devices', fmtN(devs.length), `${compact(lookups)} DNS lookups`, sumBins ? spark(sumBins, state.devices.window) : '')
       : tile('/devices', 'LAN devices', '–', 'needs the Bun viewer')) +
     (state.devices
-      ? tile('/devices', 'Tracker lookups', compact(trackers), `${pct}% of lookups`, `<div class="meter" title="${pct}% of DNS lookups were for known trackers"><i style="width:${pct}%"></i></div>`, trackers ? 'warn' : '')
+      ? tile('/devices', 'Tracker lookups', compact(trackers), `${pct}% of lookups`, delta(trackers, prevTrackers, state.win, true) + `<div class="meter" title="${pct}% of DNS lookups were for known trackers"><i style="width:${pct}%"></i></div>`, trackers ? 'warn' : '')
       : tile('/devices', 'Tracker lookups', '–', 'needs the Bun viewer')) +
     (state.sites
-      ? tile('/sites', 'Sites visited', fmtN(sites.length), `${compact(sites.reduce((n, s) => n + s.loads, 0))} loads · ${fmtN(sites.filter((s) => s.trackers).length)} with trackers`)
+      ? tile('/sites', 'Sites visited', fmtN(sites.length), `${compact(curLoads)} loads · ${fmtN(sites.filter((s) => s.trackers).length)} with trackers`, delta(curLoads, prevLoads, state.win).replace('vs prior', 'loads vs prior'))
       : tile('/sites', 'Sites visited', '–', 'needs the Bun viewer'));
 
   shadeCountries(conns);
@@ -237,8 +257,11 @@ async function poll() {
   try { state.data = await (await fetch('/api/data')).json(); render(); } catch (e) { console.warn('poll failed', e); }
 }
 async function pollSlow() {
-  const q = `since=${encodeURIComponent(state.win)}`;
-  [state.devices, state.sites] = await Promise.all([optional(`/api/devices?${q}`), optional(`/api/sites?${q}`)]);
+  const q = `since=${encodeURIComponent(state.win)}`, p = PRIOR[state.win];
+  [state.devices, state.sites, state.devices2, state.sites2] = await Promise.all([
+    optional(`/api/devices?${q}`), optional(`/api/sites?${q}`),
+    p ? optional(`/api/devices?since=${p}`) : null, p ? optional(`/api/sites?since=${p}`) : null,
+  ]);
   render();
 }
 nm.segment($('window'), state.win, (w) => { state.win = w; render(); pollSlow(); });

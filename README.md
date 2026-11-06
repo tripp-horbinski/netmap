@@ -1,15 +1,18 @@
 # netmap
 
-A live map of where this Mac's network connections go.
+A live dashboard of where this Mac and the devices on the LAN are talking to.
 
-- Polls `lsof` every 2 s. No sudo needed; it sees every process running as your user.
+- `netlog record` polls `lsof` every 2 s and sniffs DNS answers and TLS SNI for hostnames. No sudo
+  needed; it sees every process running as your user.
 - Geolocates IPs **offline** with the free DB-IP Lite databases, so your IPs aren't sent to a lookup service.
 - Keeps history in `data/netmap.sqlite` so it builds up over time.
+- The viewer (Bun) serves an overview, a world map, a LAN device dashboard and site dependency traces
+  at http://127.0.0.1:8765.
 
 ```sh
-./setup.sh                      # venv + download DB-IP Lite (~150 MB)
-.venv/bin/python netmap.py      # http://127.0.0.1:8765 (map only; the Bun viewer below has the full dashboard)
-.venv/bin/python netmap.py --home 43.07,-89.40   # set your location by hand
+./setup.sh                                   # DB-IP Lite (~150 MB), cargo build, bun build
+./install-agents.sh                          # launchd: recorder, resolver, viewer; start at login
+open http://127.0.0.1:8765
 ```
 
 ## netlog (Rust CLI: recorder + analytics for people and AI agents)
@@ -17,7 +20,6 @@ A live map of where this Mac's network connections go.
 ```sh
 cd netlog && cargo build --release && cd ..
 netlog/target/release/netlog record &                 # records lsof + DNS/TLS hostnames
-.venv/bin/python netmap.py --viewer                   # map only; netlog does the recording
 
 netlog/target/release/netlog status                   # is it running, how much data
 netlog/target/release/netlog suggest                  # ranked findings + the command to dig in
@@ -32,15 +34,15 @@ Output is a table in a terminal and JSON when piped. Queries are read-only and c
 `since('1h')`, `base_domain(host)` and `is_tracker(host)`. A Claude Code skill in
 `.claude/skills/netlog` tells Claude to use it.
 
-## Bun viewer (optional replacement for `netmap.py --viewer`)
+## Viewer
 
-`viewer/` is the map server written for [Bun](https://bun.sh): it serves `static/`, reads
-`data/netmap.sqlite` with `bun:sqlite`, and exposes the same `/api/data`, `/api/stream` and
-`/api/reset` routes as the Python viewer plus the device, site and trace APIs below. `netlog record`
-still does the recording.
+`viewer/` is the web server, written for [Bun](https://bun.sh): it serves `static/`, reads
+`data/netmap.sqlite` with `bun:sqlite`, and exposes `/api/data`, `/api/stream` and `/api/reset`
+plus the device, site and trace APIs below. `netlog record` does the recording.
 
-Pages: `/` is the overview (opens per minute, destinations, LAN devices, tracker share, sites visited,
-a mini world map, the live feed, and the top sites, devices, apps and networks for the chosen window);
+Pages: `/` is the overview (opens per minute stacked by app, destinations, LAN devices, tracker share,
+sites visited, each with its change against the prior window once the data reaches back that far, a
+mini world map, the live feed, and the top sites, devices, apps and networks for the chosen window);
 `/map` is the full world map; `/devices` and `/sites` are below. All four share `static/app.css` and
 `static/app.js` (top nav, light/dark theme that follows the system with a toggle, sparklines, tables).
 The old `/#trace=IP` links redirect to `/map#trace=IP`.
@@ -54,10 +56,9 @@ bun run build                                # single binary: viewer/dist/netmap
 ./dist/netmap-viewer --root ..               # the binary needs --root (or cwd) = this checkout
 ```
 
-`VIEWER=bun ./install-agents.sh` points the launchd viewer agent at the compiled binary instead of
-Python; run `bun run build` first and rerun the script after rebuilding.
+`./install-agents.sh` runs the compiled binary under launchd; rerun it after `bun run build`.
 
-The Bun viewer also serves a LAN device dashboard at `/devices` (linked from the map): every device
+`/devices` is the LAN device dashboard: every device
 the resolver has heard from, with lookups over time, domains, tracker lookups, and names it had
 never asked for before the chosen window. Click a row to name a device; it's the same `label` that
 `netlog name` sets. The detail view includes a weekday-by-hour heatmap of lookups (local time) so a
@@ -88,7 +89,8 @@ map shades the same way.
 
 **Route traces** on the map: the *route* button in any destination popup runs the system
 `traceroute` in ICMP mode (setuid on macOS, so no sudo; UDP probes die at AT&T) and draws the path
-through every hop that geolocates, with the full hop list in the sidebar. Results cache for six
+through every hop that geolocates, with the full hop list in the sidebar (each row's wash is its
+round-trip time relative to the slowest hop). Results cache for six
 hours in a `traces` table; *again* reruns. `GET /api/trace/IP[?fresh=1]`, or open the map at
 `/map#trace=IP`. The probe gives up after six silent hops in a row. Hop locations are the DB-IP guess
 for the block, which is often the carrier's regional hub rather than the router's city.
@@ -102,7 +104,7 @@ launchctl list | grep -E "netlog|netmap"
 tail -f ~/Library/Logs/netmap/*.log
 ```
 
-After rebuilding `netlog`, rerun `./install-agents.sh` to restart the services on the new binary.
+After rebuilding `netlog` or the viewer, rerun `./install-agents.sh` to restart the services on the new binaries.
 
 ## Whole-LAN visibility: the Mac as the house DNS server (interim, until an always-on box)
 
