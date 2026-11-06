@@ -274,8 +274,9 @@ svg.spark rect.now { fill: var(--text); }
 .graph-table { margin-top: 10px; }
 
 /* ---- findings (overview) ---------------------------------------------------------------- */
-.status { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin: 2px 0 14px; }
+.status { display: flex; flex-direction: column; gap: 2px; margin: 2px 0 14px; }
 .status .big { font-size: 20px; font-weight: 600; }
+.status .muted { font-size: 13px; }
 .status .ok { color: var(--good); }
 .findings { display: grid; gap: 8px; }
 .finding { display: grid; grid-template-columns: 10px 1fr auto; gap: 12px; align-items: start; padding: 12px 14px;

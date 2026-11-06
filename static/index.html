@@ -31,7 +31,7 @@ if (/^#trace=/.test(location.hash)) location.replace('/map' + location.hash);</s
     <div class="card normal"><h2>What's normal <span class="muted" id="base-days"></span></h2><div id="normal" class="muted">Loading…</div></div>
     <div>
       <div class="strip" id="tiles"></div>
-      <div class="card hero-card" style="margin-top:10px"><div class="hero" style="gap:8px"><span class="value" id="h-rate" style="font-size:28px">0</span><span class="what">opens in the last minute</span><span class="muted" id="h-sub" style="margin-left:auto"></span></div><div id="h-spark"></div></div>
+      <div class="card hero-card" style="margin-top:10px"><div class="hero" style="gap:8px"><span class="value" id="h-rate" style="font-size:28px">0</span><span class="what">opens in the last minute</span><span id="h-sub"></span></div><div id="h-spark"></div><div class="axis"><span>15 minutes ago</span><span>by app · now</span></div></div>
     </div>
   </div>
 
@@ -105,7 +105,7 @@ function render() {
   const lastMin = recent.filter((c) => d.now - c.first_seen < 60).length;
   const prevMin = recent.filter((c) => d.now - c.first_seen >= 60 && d.now - c.first_seen < 120).length;
   $('h-rate').textContent = fmtN(lastMin);
-  $('h-sub').innerHTML = `${delta(lastMin, prevMin, 'minute')} · 15 min by app`;
+  $('h-sub').innerHTML = delta(lastMin, prevMin, 'minute');
   const perApp = new Map();
   for (const c of recent) (perApp.get(c.process) ?? perApp.set(c.process, []).get(c.process)).push(c.first_seen);
   const ranked = [...perApp].sort((a, b) => b[1].length - a[1].length);
@@ -214,10 +214,11 @@ function renderFindings() {
   if (!r) return;
   const n = r.findings.length;
   const span = state.win === 'all' ? 'while' : state.win;
-  const hidden = r.expected_hidden ? ` · ${r.expected_hidden} expected, hidden` : '';
+  const hidden = r.expected_hidden > 0;
+  const note = r.baseline.days < 1 ? 'Findings start once there is a day of history to compare against.' : hidden ? `${r.expected_hidden} expected and hidden.` : '';
   $('status').innerHTML = n
-    ? `<span class="big">${n} thing${n === 1 ? '' : 's'} worth a look</span><span class="muted">in the last ${span}${hidden}</span>`
-    : `<span class="big ok">Nothing unusual</span><span class="muted">in the last ${span}${hidden}${r.baseline.days < 1 ? ' · the baseline needs a day of history first' : ''}</span>`;
+    ? `<span class="big">${n} thing${n === 1 ? '' : 's'} worth a look in the last ${span}</span>${note ? `<span class="muted">${note}</span>` : ''}`
+    : `<span class="big ok">Nothing unusual in the last ${span}</span>${note ? `<span class="muted">${note}</span>` : ''}`;
   const sev = (s) => (s >= 90 ? 's4' : s >= 60 ? 's3' : 's2');
   $('findings').innerHTML = r.findings.map((f) => `
     <div class="finding ${sev(f.score)}"><i title="score ${f.score}"></i>
