@@ -74,8 +74,32 @@ pub fn describe(path: &str) -> AppInfo {
         if info.name.is_none() {
             info.name = Path::new(dir).file_stem().map(|s| s.to_string_lossy().into_owned());
         }
+    } else if let Some((product, version)) = versioned_binary(path) {
+        // Tools installed as <product>/versions/<version>: the executable is named by its version.
+        info.name = Some(product);
+        info.version = Some(version);
     }
     info
+}
+
+/// "/Users/me/.local/share/claude/versions/2.1.319" -> ("Claude Code", "2.1.319"). The product
+/// name comes from the directory above `versions`, with the few we know spelled properly.
+pub fn versioned_binary(path: &str) -> Option<(String, String)> {
+    let p = Path::new(path);
+    let version = p.file_name()?.to_str()?;
+    if !version.chars().next().is_some_and(|c| c.is_ascii_digit()) || !version.contains('.') {
+        return None;
+    }
+    let parent = p.parent()?;
+    if parent.file_name()?.to_str()? != "versions" {
+        return None;
+    }
+    let product = parent.parent()?.file_name()?.to_str()?;
+    let name = match product {
+        "claude" => "Claude Code".to_string(),
+        other => other.to_string(),
+    };
+    Some((name, version.to_string()))
 }
 
 /// Resolves pids to apps with a cache per executable path; a pid is re-checked each time
@@ -136,6 +160,16 @@ mod tests {
         let p = "/Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/1/Helpers/Google Chrome Helper (Aperitif).app/Contents/MacOS/Google Chrome Helper (Aperitif)";
         assert_eq!(bundle_dir(p), Some("/Applications/Google Chrome.app"));
         assert_eq!(bundle_dir("/usr/libexec/nsurlsessiond"), None);
+    }
+
+    #[test]
+    fn claude_code_binary() {
+        let i = describe("/Users/tripp/.local/share/claude/versions/2.1.319");
+        assert_eq!(i.process, "2.1.319");
+        assert_eq!(i.name.as_deref(), Some("Claude Code"));
+        assert_eq!(i.version.as_deref(), Some("2.1.319"));
+        assert_eq!(versioned_binary("/usr/bin/curl"), None);
+        assert_eq!(versioned_binary("/opt/x/versions/notes"), None);
     }
 
     #[test]

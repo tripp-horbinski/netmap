@@ -17,11 +17,14 @@ pub struct Report {
 pub const REPORTS: &[Report] = &[
     Report {
         name: "apps",
-        about: "Each app: how many IPs, domains and companies it talked to",
-        sql: "SELECT app, COUNT(DISTINCT ip) AS ips, COUNT(DISTINCT base_domain(host)) AS domains,
+        about: "Each app: how many IPs, domains and companies it talked to (name = resolved bundle)",
+        sql: "SELECT app,
+                     COALESCE(a.name || CASE WHEN a.version IS NOT NULL AND app = a.version THEN ' ' || a.version ELSE '' END, app) AS name,
+                     COUNT(DISTINCT ip) AS ips, COUNT(DISTINCT base_domain(host)) AS domains,
                      COUNT(DISTINCT org) AS orgs, SUM(samples) AS samples,
                      datetime(MAX(last_seen), 'unixepoch', 'localtime') AS last_seen
-              FROM connections WHERE last_seen >= :since AND (:app IS NULL OR app = :app)
+              FROM connections LEFT JOIN apps a ON a.process = app
+              WHERE last_seen >= :since AND (:app IS NULL OR app = :app)
               GROUP BY app ORDER BY ips DESC",
     },
     Report {

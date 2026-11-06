@@ -50,8 +50,7 @@ window.nm = (() => {
     if (!p) return p;
     for (const [re, name] of APP_ALIAS) if (re.test(p)) return name; // one name per product, whatever the helper
     const a = apps.get(p);
-    if (a?.path?.includes('/share/claude/versions/')) return 'Claude Code'; // its binary is named by version
-    if (a?.name) return a.name;
+    if (a?.name) return a.version && p === a.version ? `${a.name} ${a.version}` : a.name; // "Claude Code 2.1.319": the binary is named by its version
     return p.replace(/ Helper( \(.*\))?$/, '').replace(/ \((Renderer|GPU|Plugin|Networking|Alerts|Utility)\)$/, '');
   }
   /** Rewrite process names on a /api/data snapshot in place; the raw name is kept as `raw`. */
