@@ -38,6 +38,7 @@ const NEVER_ROOT: readonly RegExp[] = [
 const IP = /^(\d{1,3}(\.\d{1,3}){3}|[0-9a-f:]+:[0-9a-f:]*)$/i;
 const UNKNOWN_APP = "(unknown)";
 const BROWSER = /chrome|chromium|safari|firefox|arc|edge|brave|orion|vivaldi|opera|webkit/i;
+const CHROME = /google chrome|chromium/i;
 
 export function isBrowser(app: string): boolean {
   return BROWSER.test(app);
@@ -77,6 +78,8 @@ export interface Load {
   root: string;
   /** The load began with a www. or apex host, so the site attribution is reliable. */
   strong: boolean;
+  /** Reported by the Chrome extension: the tab really was on this site. */
+  exact?: boolean;
   start: number; end: number; hits: Hit[];
 }
 
@@ -84,7 +87,9 @@ export interface SiteSummary {
   site: string;
   /** What to call the site: the usual root host when it is a non-www subdomain (tripp.horbin.ski), else the base domain. */
   label: string;
-  loads: number; last: number; apps: string[];
+  loads: number;
+  /** How many of the loads came from the Chrome extension rather than the burst heuristic. */
+  exact: number; last: number; apps: string[];
   hosts: number; third_party: number; trackers: number; orgs: number;
 }
 
@@ -241,7 +246,7 @@ function summarize(site: string, loads: Load[], pinned: boolean): SiteSummary {
   // Only a pinned site gets its root host as the name; for the rest the base domain is the
   // identity and the root is often a CDN node like rr10---sn-...googlevideo.com.
   const label = !pinned || top === site || top === `www.${site}` ? site : top;
-  return { site, label, loads: loads.length, last: loads[0]!.start, apps: [...apps].sort(),
+  return { site, label, loads: loads.length, exact: loads.filter((l) => l.exact).length, last: loads[0]!.start, apps: [...apps].sort(),
            hosts: hosts.size, third_party: third, trackers, orgs: orgs.size };
 }
 
@@ -249,7 +254,7 @@ const KNOWN_KEY = "viewer.known_sites";
 
 export class SitesDb {
   private opensQ; private knownQ; private setKnownQ;
-  constructor(db: Database) {
+  constructor(db: Database, private browser: { loads(since: number): Load[]; status(): { first: number | null } } | null = null) {
     this.knownQ = db.query<{ value: string }, [string]>("SELECT value FROM meta WHERE key = ?1");
     this.setKnownQ = db.query<void, [string, string]>(
       "INSERT INTO meta VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value");
@@ -278,11 +283,18 @@ export class SitesDb {
    *  Two passes: the first learns which domains began a load with a www. or apex host, the
    *  second also splits bursts at those domains (and at the user's pinned sites). */
   loads(window: string, browsersOnly = false): Load[] {
-    const rows = this.opensQ.all(sinceTs(window));
+    const since = sinceTs(window);
+    const rows = this.opensQ.all(since);
     const opens = rows.map((r) => ({ id: r.id, ts: r.ts, app: r.app, ip: r.ip, name: nameOf(r.host, r.rdns, r.ip), org: r.org, country: r.country }));
     const known = new Set(this.known());
+    // Exact loads from the Chrome extension replace the heuristic ones for Chrome from the moment
+    // the extension started reporting; their sites also help split other browsers' bursts.
+    const exact = this.browser?.loads(since) ?? [];
+    const exactFrom = exact.length ? this.browser!.status().first ?? Infinity : Infinity;
+    for (const l of exact) known.add(l.site);
     for (const l of sessionize(opens, known)) if (l.strong) known.add(l.site);
-    const loads = sessionize(opens, known);
+    const heuristic = sessionize(opens, known).filter((l) => !(CHROME.test(l.app) && l.start >= exactFrom));
+    const loads = [...exact, ...heuristic].sort((a, b) => b.start - a.start);
     return browsersOnly ? loads.filter((l) => isBrowser(l.app)) : loads;
   }
 

@@ -307,7 +307,7 @@ function renderLive() {
   if (!live.length) return;
   document.getElementById('live').innerHTML = live.slice(0, 8).map(e =>
     `<li data-id="${e.id}"${e === live[0] ? ' class="new"' : ''}><span class="dot" style="background:${color(e.app)}"></span>
-       <span class="name"><b>${esc(e.app)}</b> → ${esc(e.host || e.org || e.ip)}</span>
+       <span class="name"><b>${esc(e.app)}</b>${e.site ? ` · ${esc(e.site)}` : ''} → ${esc(e.host || e.org || e.ip)}</span>
        <span class="t">${ago(Math.max(0, now - e.ts))}</span></li>`).join('');
 }
 function flash(e) {
@@ -387,7 +387,7 @@ setInterval(renderLive, 5000);
 
 async function poll() {
   try {
-    state.data = await (await fetch('/api/data')).json();
+    state.data = nm.aliasConnections(await (await fetch('/api/data')).json());
     const m = /^#trace=([0-9a-f.:]+)$/i.exec(location.hash);
     if (m && !route.ip) traceRoute(m[1]);
     render();

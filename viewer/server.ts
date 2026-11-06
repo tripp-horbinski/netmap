@@ -13,6 +13,7 @@ import { Geo } from "./geo";
 import { NetmapDb } from "./db";
 import { LanDb } from "./lan";
 import { SitesDb } from "./sites";
+import { BrowserDb } from "./browser";
 import { Tracer, isIp } from "./trace";
 
 const COMPILED = import.meta.dir.startsWith("/$bunfs");
@@ -60,9 +61,10 @@ async function findHome(override: string | undefined, geo: Geo | null): Promise<
 }
 
 const db = new NetmapDb(DB_PATH);
-const lan = new LanDb(db.db);
-const sites = new SitesDb(db.db);
 const geo = await Geo.open(DATA);
+const lan = new LanDb(db.db);
+const browser = new BrowserDb(db.db, geo);
+const sites = new SitesDb(db.db, browser);
 const home = await findHome(args.home, geo);
 const tracer = new Tracer(db.db, geo);
 
@@ -94,7 +96,9 @@ function stream(): Response {
         try {
           const events = db.eventsAfter(last);
           for (const e of events) {
-            controller.enqueue(enc.encode(`data: ${JSON.stringify(e)}\n\n`));
+            // The page a browser request belonged to, when the Chrome extension reported it.
+            const site = browser.siteFor(e.host, e.ts);
+            controller.enqueue(enc.encode(`data: ${JSON.stringify(site ? { ...e, site } : e)}\n\n`));
             last = e.id;
           }
           idle = events.length ? 0 : idle + 0.25;
@@ -134,6 +138,16 @@ function withWindow(fn: (window: string) => unknown): (req: Request) => Response
   };
 }
 
+/** The extension posts from a chrome-extension:// origin, which needs CORS headers; nothing else may. */
+function cors(req: Request, res: Response): Response {
+  const origin = req.headers.get("origin") ?? "";
+  if (!/^(chrome|moz)-extension:\/\//.test(origin)) return res;
+  res.headers.set("Access-Control-Allow-Origin", origin);
+  res.headers.set("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
+  res.headers.set("Access-Control-Allow-Headers", "Content-Type");
+  return res;
+}
+
 async function staticFile(pathname: string): Promise<Response> {
   const rel = normalize(decodeURIComponent(pathname === "/" ? "/index.html" : pathname));
   const path = join(STATIC, rel);
@@ -166,6 +180,16 @@ const server = Bun.serve({
         }
       },
     },
+    "/api/browser/requests": {
+      OPTIONS: (req) => cors(req, new Response(null, { status: 204 })),
+      POST: async (req) => {
+        const origin = req.headers.get("origin");
+        if (origin && !/^(chrome|moz)-extension:\/\//.test(origin)) return json({ error: "extension origins only" }, 403);
+        const body = (await req.json().catch(() => null)) as { rows?: unknown } | null;
+        return cors(req, json({ ok: true, stored: browser.ingest(body?.rows) }));
+      },
+    },
+    "/api/browser/status": { GET: () => json(browser.status()) },
     "/api/sites/graph": { GET: (req) => withWindow((w) => sites.graph(w, browsersOnly(req)))(req) },
     "/api/sites/known": {
       GET: () => json(sites.known()),

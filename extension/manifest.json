@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "netmap browser reporter",
+  "version": "0.1.0",
+  "description": "Tells the local netmap viewer which tab and site each web request belongs to. Talks only to 127.0.0.1.",
+  "permissions": ["webRequest", "webNavigation", "tabs", "storage"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "background.js" },
+  "options_ui": { "page": "options.html", "open_in_tab": false },
+  "icons": { "128": "icon.png" }
+}

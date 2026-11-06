@@ -222,7 +222,7 @@ function renderLive() {
   const n = nm.perMinute();
   $('rate').textContent = ev.length ? `· ${n}${n >= 60 ? '+' : ''} in the last minute` : '';
   if (!ev.length) return;
-  $('live').innerHTML = ev.map((e) => `<li data-id="${e.id}"><span class="dot" style="background:${color(e.app)}"></span><span class="name"><b>${esc(e.app)}</b> → ${esc(e.host || e.org || e.ip)}</span><span class="t">${ago(e.ts)}</span></li>`).join('');
+  $('live').innerHTML = ev.map((e) => `<li data-id="${e.id}"><span class="dot" style="background:${color(e.app)}"></span><span class="name"><b>${esc(e.app)}</b>${e.site ? ` · ${esc(e.site)}` : ''} → ${esc(e.host || e.org || e.ip)}</span><span class="t">${ago(e.ts)}</span></li>`).join('');
   $('live').firstElementChild.classList.add('new');
 }
 let flashing = 0;
@@ -254,7 +254,7 @@ setInterval(renderLive, 5000);
 // ---- data -------------------------------------------------------------------------------------
 const optional = (url) => fetch(url).then((r) => (r.ok ? r.json() : null)).catch(() => null);
 async function poll() {
-  try { state.data = await (await fetch('/api/data')).json(); render(); } catch (e) { console.warn('poll failed', e); }
+  try { state.data = nm.aliasConnections(await (await fetch('/api/data')).json()); render(); } catch (e) { console.warn('poll failed', e); }
 }
 async function pollSlow() {
   const q = `since=${encodeURIComponent(state.win)}`, p = PRIOR[state.win];

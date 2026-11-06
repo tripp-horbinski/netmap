@@ -83,6 +83,26 @@ With no site selected the page shows the dependency graph: the sites with the bi
 footprint on the left, the companies serving those hosts on the right, one ribbon per pair, hover for
 the host names, a table view behind the *Table* button. `GET /api/sites/graph?since=24h`.
 
+## Exact browser attribution (Chrome extension)
+
+Chrome sends every tab's traffic through one Network Service process, so from outside the browser
+`lsof` can only say "Google Chrome Helper": which tab, and therefore which site, is invisible. The
+viewer shows helper processes under their product name (Chrome, Spotify, Claude) and the sites view
+reconstructs sites from bursts, but that is a heuristic. `extension/` is a small Chrome extension
+(Manifest V3, `webRequest` + `webNavigation`) that reports every request with the tab and the page
+the tab was on to `POST /api/browser/requests` on localhost. Nothing leaves the machine; the rows
+land in a `browser_requests` table in `data/netmap.sqlite`.
+
+Install once: chrome://extensions, *Developer mode*, *Load unpacked*, pick `extension/`. From then on:
+
+- `/sites` uses the reported loads for Chrome instead of the heuristic (marked *exact*; other
+  browsers still use bursts), so a site's trace is what the tab really requested, with offsets from
+  the navigation.
+- The live feed and the map's feed show the page behind each Chrome connection
+  ("Chrome · github.com → api.github.com"), including the ones `lsof` was too slow to name.
+- `GET /api/browser/status` says how much has been reported. The endpoint is configurable on the
+  extension's options page if the viewer runs on another port.
+
 Countries on the map are shaded by how many destinations in the window sit inside them (one hue,
 lighter to darker, legend in the sidebar, hover a shaded country for the count). The overview's mini
 map shades the same way.

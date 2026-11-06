@@ -35,6 +35,21 @@ window.nm = (() => {
   /** Read a CSS token (e.g. '--accent') as it currently resolves. */
   const token = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
+  // Process names from lsof are helper processes ("Google Chrome Helper (Aperitif)"); the product
+  // name is what a person wants to see. The raw name stays in `raw` on the records.
+  const APP_ALIAS = [
+    [/^Google Chrome( Helper.*| Canary)?$/, 'Chrome'], [/^Chromium/, 'Chromium'], [/^Microsoft Edge/, 'Edge'],
+    [/^Brave Browser/, 'Brave'], [/^Arc( Helper.*)?$/, 'Arc'], [/^firefox/i, 'Firefox'], [/^(Safari|com\.apple\.WebKit)/, 'Safari'],
+    [/^Code Helper/, 'VS Code'], [/^Electron( Helper.*)?$/, 'Electron'],
+  ];
+  function appName(p) {
+    if (!p) return p;
+    for (const [re, name] of APP_ALIAS) if (re.test(p)) return name;
+    return p.replace(/ Helper( \(.*\))?$/, '').replace(/ \((Renderer|GPU|Plugin|Networking|Alerts|Utility)\)$/, '');
+  }
+  /** Rewrite process names on a /api/data snapshot in place; the raw name is kept as `raw`. */
+  function aliasConnections(d) { for (const c of d.connections) { c.raw = c.process; c.process = appName(c.process); } return d; }
+
   // Stable per-app hue; lightness suits the surface so dots read on both themes.
   function color(name) {
     let h = 0;
@@ -73,6 +88,7 @@ window.nm = (() => {
     live.src.onerror = () => { live.open = false; tickNav(); };
     live.src.onmessage = (m) => {
       const e = JSON.parse(m.data);
+      e.raw = e.app; e.app = appName(e.app);
       live.events.unshift(e); live.events.splice(120);
       tickNav();
       for (const f of live.listeners) f(e);
@@ -174,5 +190,5 @@ window.nm = (() => {
   }
   const WINDOW_SECONDS = { '1h': 3600, '24h': 86400, '7d': 604800, all: Infinity };
 
-  return { esc, fmtN, compact, ago, when, ms, nav, stream, live, perMinute, spark, binTimes, rows, bars, segment, color, token, isDark, WINDOW_SECONDS, countryKey, mix, choroFill, stackedSpark, delta };
+  return { esc, fmtN, compact, ago, when, ms, nav, stream, live, perMinute, spark, binTimes, rows, bars, segment, color, token, isDark, WINDOW_SECONDS, countryKey, mix, choroFill, stackedSpark, delta, appName, aliasConnections };
 })();

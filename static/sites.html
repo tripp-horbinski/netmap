@@ -39,6 +39,7 @@
   </div>
   <input class="filter" id="filter" type="search" placeholder="Filter sites…">
   <h2>Sites <span class="muted" id="count"></span></h2>
+  <p class="muted" id="ext" style="display:none"></p>
   <ul class="list" id="sites"><li class="muted">Loading…</li></ul>
 </aside>
 <main id="main"><div class="empty">Pick a site.</div></main>
@@ -52,6 +53,14 @@ const state = { win: '24h', site: null, list: [], detail: null, q: '', graph: nu
 nm.nav('/sites');
 nm.stream();
 
+function showExt(st) {
+  const el = $('ext');
+  el.style.display = '';
+  el.innerHTML = st.rows
+    ? `Chrome extension: ${fmtN(st.rows)} requests reported, last ${ago(st.last)}. Its loads are marked <span class="tag fp">exact</span>.`
+    : 'Chrome attribution here is a heuristic. For exact per-tab traces, load <code>extension/</code> at chrome://extensions.';
+}
+
 function renderList() {
   const q = state.q.toLowerCase();
   const list = state.list.filter((s) => !q || s.site.includes(q) || s.label.includes(q));
@@ -59,7 +68,7 @@ function renderList() {
   if (!list.length) { $('sites').innerHTML = '<li class="muted">No loads in this window.</li>'; return; }
   $('sites').innerHTML = list.map((s) => `
     <li class="row${s.site === state.site ? ' sel' : ''}" data-site="${esc(s.site)}">
-      <div class="name" title="${esc(s.site)}">${esc(s.label)}<small>${fmtN(s.loads)} load${s.loads === 1 ? '' : 's'} · ${ago(s.last)}</small></div>
+      <div class="name" title="${esc(s.site)}${s.exact ? ' · exact (Chrome extension)' : ''}">${esc(s.label)}<small>${fmtN(s.loads)} load${s.loads === 1 ? '' : 's'} · ${ago(s.last)}${s.exact ? ' · exact' : ''}</small></div>
       <div class="n" title="third-party hosts">${fmtN(s.third_party)}</div>
       <div class="n${s.trackers ? ' warn' : ''}" title="tracker hosts">${fmtN(s.trackers)}</div>
     </li>`).join('');
@@ -139,7 +148,7 @@ function renderDetail() {
   $('main').innerHTML = `
     <div class="head"><button class="btn small" id="back" title="Back to the dependency graph">← all sites</button><h3>${esc(s.label)}${s.label !== s.site ? ` <span class="muted">${esc(s.site)}</span>` : ''}</h3>${d.pinned ? '<span class="tag fp">pinned</span>' : ''}
       <button class="btn small" id="pin-site" title="${d.pinned ? 'Stop treating this as a site you visit' : 'Always treat this as a site you visit, even mid-burst'}">${d.pinned ? 'Unpin' : 'Pin as site'}</button></div>
-    <div class="muted">${fmtN(s.loads)} load${s.loads === 1 ? '' : 's'} from ${s.apps.map(esc).join(', ')} · last ${ago(s.last)}</div>
+    <div class="muted">${fmtN(s.loads)} load${s.loads === 1 ? '' : 's'} from ${[...new Set(s.apps.map(nm.appName))].map(esc).join(', ')} · last ${ago(s.last)}${s.exact ? ` · <span class="tag fp" title="${fmtN(s.exact)} of ${fmtN(s.loads)} loads reported by the Chrome extension">${s.exact === s.loads ? 'exact' : `${fmtN(s.exact)} exact`}</span>` : ''}</div>
     <div class="tiles">
       <div class="tile"><div class="label">Hosts</div><div class="value">${fmtN(s.hosts)}</div></div>
       <div class="tile"><div class="label">Third-party hosts</div><div class="value">${fmtN(s.third_party)}</div></div>
@@ -164,7 +173,7 @@ function renderDetail() {
     <h2>Loads</h2>
     ${rows(d.loads.slice(0, 40), [
       { h: 'when', f: (r) => when(r.start) },
-      { h: 'app', f: (r) => esc(r.app) },
+      { h: 'app', f: (r) => esc(nm.appName(r.app)) },
       { h: 'hosts', n: true, f: (r) => fmtN(r.hosts) },
       { h: 'trackers', n: true, f: (r) => fmtN(r.trackers) },
     ], 'Nothing.')}
@@ -194,6 +203,7 @@ async function refresh() {
     fetch(`/api/sites?${q}`).then((r) => r.json()),
     state.site ? fetch(`/api/sites/${encodeURIComponent(state.site)}?${q}`).then((r) => (r.ok ? r.json() : null)) : null,
     state.site ? state.graph : fetch(`/api/sites/graph?${q}`).then((r) => r.json()),
+    fetch('/api/browser/status').then((r) => r.json()).then(showExt).catch(() => {}),
   ]);
   state.list = list; state.detail = detail; state.graph = graph;
   renderList(); renderDetail();
