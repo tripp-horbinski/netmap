@@ -1,0 +1,18 @@
+{
+  "name": "netmap-viewer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bun run server.ts",
+    "dev": "bun --watch run server.ts",
+    "build": "bun build --compile --minify server.ts --outfile dist/netmap-viewer",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "maxmind": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}

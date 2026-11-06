@@ -3,10 +3,12 @@
 # login and restart if they die. Logs go to ~/Library/Logs/netmap/.
 #   ./install-agents.sh            install and start
 #   ./install-agents.sh uninstall  stop and remove
+#   VIEWER=bun ./install-agents.sh use the compiled Bun viewer (viewer/dist/netmap-viewer)
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 NETLOG="$ROOT/netlog/target/release/netlog"
 PY="$ROOT/.venv/bin/python"
+BUN_VIEWER="$ROOT/viewer/dist/netmap-viewer"
 AGENTS="$HOME/Library/LaunchAgents"
 LOGS="$HOME/Library/Logs/netmap"
 DOMAIN="gui/$(id -u)"
@@ -24,7 +26,13 @@ if [[ "${1:-}" == "uninstall" ]]; then
 fi
 
 [[ -x "$NETLOG" ]] || { echo "build first: (cd netlog && cargo build --release)" >&2; exit 1; }
-[[ -x "$PY" ]] || { echo "run ./setup.sh first" >&2; exit 1; }
+if [[ "${VIEWER:-python}" == "bun" ]]; then
+  [[ -x "$BUN_VIEWER" ]] || { echo "build first: (cd viewer && bun install && bun run build)" >&2; exit 1; }
+  VIEWER_CMD=("$BUN_VIEWER" --root "$ROOT")
+else
+  [[ -x "$PY" ]] || { echo "run ./setup.sh first" >&2; exit 1; }
+  VIEWER_CMD=("$PY" "$ROOT/netmap.py" --viewer)
+fi
 mkdir -p "$AGENTS" "$LOGS"
 
 # install NAME PROGRAM [ARGS...]
@@ -57,4 +65,4 @@ EOF
 
 install com.tripp.netlog.record  "$NETLOG" record
 install com.tripp.netlog.resolve "$NETLOG" resolve
-install com.tripp.netmap.viewer  "$PY" "$ROOT/netmap.py" --viewer
+install com.tripp.netmap.viewer  "${VIEWER_CMD[@]}"

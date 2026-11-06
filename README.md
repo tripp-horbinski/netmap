@@ -32,6 +32,24 @@ Output is a table in a terminal and JSON when piped. Queries are read-only and c
 `since('1h')`, `base_domain(host)` and `is_tracker(host)`. A Claude Code skill in
 `.claude/skills/netlog` tells Claude to use it.
 
+## Bun viewer (optional replacement for `netmap.py --viewer`)
+
+`viewer/` is the same map server written for [Bun](https://bun.sh): it serves `static/`, reads
+`data/netmap.sqlite` with `bun:sqlite`, and exposes the same `/api/data`, `/api/stream` and
+`/api/reset` routes, so `static/index.html` is unchanged. `netlog record` still does the recording.
+
+```sh
+cd viewer && bun install
+bun run dev                                  # http://127.0.0.1:8765, restarts on edit
+bun run server.ts --port 8766 --home 43.07,-89.40
+bun test
+bun run build                                # single binary: viewer/dist/netmap-viewer
+./dist/netmap-viewer --root ..               # the binary needs --root (or cwd) = this checkout
+```
+
+`VIEWER=bun ./install-agents.sh` points the launchd viewer agent at the compiled binary instead of
+Python; run `bun run build` first and rerun the script after rebuilding.
+
 ## Run it as a service
 
 ```sh
