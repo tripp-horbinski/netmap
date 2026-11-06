@@ -180,7 +180,9 @@ function render() {
   const win = state.win === 'live' ? liveSec : state.win === 'all' ? Infinity : +state.win;
   const isLive = c => d.now - c.last_seen <= liveSec;
   const inWin = d.connections.filter(c => d.now - c.last_seen <= win);
-  const conns = state.proc ? inWin.filter(c => c.process === state.proc || c.via === state.proc) : inWin;
+  // A filter on an app also covers everything launched from it, at any depth.
+  const under = (c) => { let v = c.process, hops = 0; while (v && hops++ < 8) { if (v === state.proc) return true; v = v === c.process ? c.via : (state.data.via?.[v] ?? null); } return false; };
+  const conns = state.proc ? inWin.filter(c => under(c)) : inWin;
 
   // Stats
   const ips = new Set(conns.map(c => c.ip));
@@ -252,13 +254,12 @@ function renderSidebar(inWin, conns, unknown, isLive, now) {
   }
   document.getElementById('proc-hint').textContent = state.proc ? '· click again to show all' : '· click to filter';
   // CLI tools sit under the app that launched them (via); the parent row filters to the whole group.
-  const row = (name, n, live, sub = false) =>
-    `<li class="row ${sub ? 'sub' : ''} ${state.proc === name ? 'sel' : ''}" data-proc="${esc(name)}">
-       <span class="dot ${live ? 'live' : ''}" style="background:${color(name)}"></span>
-       <span class="name">${esc(name)}</span><span class="n">${n}</span></li>`;
-  const groups = nm.groupByVia([...procs].map(([name, p]) => ({ name, n: p.ips.size, live: p.live, via: p.via })));
-  document.getElementById('procs').innerHTML = groups.map((g) =>
-    row(g.name, g.n, g.live) + g.children.map((c) => row(c.name, c.n, c.live, true)).join('')).join('') || '<li class="muted">Waiting for connections…</li>';
+  const row = (g, depth) =>
+    `<li class="row ${depth ? 'sub' : ''} ${state.proc === g.name ? 'sel' : ''}" style="--d:${depth}" data-proc="${esc(g.name)}">
+       <span class="dot ${g.live ? 'live' : ''}" style="background:${color(g.name)}"></span>
+       <span class="name">${esc(g.name)}</span><span class="n">${g.n}</span></li>`;
+  const tree = nm.groupByVia([...procs].map(([name, p]) => ({ name, n: p.ips.size, live: p.live, via: p.via })));
+  document.getElementById('procs').innerHTML = tree.map(([g, d]) => row(g, d)).join('') || '<li class="muted">Waiting for connections…</li>';
 
   // Orgs
   const orgs = new Map();

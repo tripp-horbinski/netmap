@@ -50,6 +50,18 @@ pub struct AppInfo {
     pub feed_url: Option<String>,
 }
 
+impl AppInfo {
+    /// What to call this app in a `via` chain: the bundle or product name, with the version when
+    /// the executable itself is named by its version ("Claude Code 2.1.319"), matching the pages.
+    pub fn label(&self) -> Option<String> {
+        let name = self.name.as_ref()?;
+        Some(match &self.version {
+            Some(v) if *v == self.process => format!("{name} {v}"),
+            _ => name.clone(),
+        })
+    }
+}
+
 /// The outermost `.app` directory on the path, so helpers deep inside Chrome resolve to Chrome.
 pub fn bundle_dir(path: &str) -> Option<&str> {
     let i = path.find(".app/")?;
@@ -117,9 +129,10 @@ impl Resolver {
         Some(self.by_path.entry(path.clone()).or_insert_with(|| describe(&path)).clone())
     }
 
-    /// The app a process was launched from: the first ancestor living in a different `.app`
-    /// bundle, so `ssh` run in a terminal reports the terminal and a Chrome helper reports
-    /// nothing (its parent is Chrome itself). None for daemons under launchd.
+    /// The app a process was launched from: the nearest ancestor that resolves to an app (a
+    /// different `.app` bundle, or a versioned product binary like Claude Code), so `gh` run by
+    /// Claude Code in a terminal reports Claude Code, Claude Code reports the terminal, and a
+    /// Chrome helper reports nothing (its parent is Chrome itself). None for daemons under launchd.
     pub fn via(&mut self, pid: i32) -> Option<String> {
         if self.via_cache.len() > 5000 {
             self.via_cache.clear();
@@ -127,7 +140,8 @@ impl Resolver {
         if let Some(v) = self.via_cache.get(&pid) {
             return v.clone();
         }
-        let own_bundle = exe_path(pid).as_deref().and_then(bundle_dir).map(str::to_string);
+        let own_path = exe_path(pid);
+        let own_bundle = own_path.as_deref().and_then(bundle_dir).map(str::to_string);
         let mut cur = pid;
         let mut found = None;
         for _ in 0..12 {
@@ -136,10 +150,12 @@ impl Resolver {
                 break;
             }
             if let Some(path) = exe_path(parent) {
-                if let Some(dir) = bundle_dir(&path) {
-                    if own_bundle.as_deref() != Some(dir) {
-                        let info = self.by_path.entry(path.clone()).or_insert_with(|| describe(&path));
-                        found = info.name.clone().or_else(|| Some(info.process.clone()));
+                let same_app = Some(path.as_str()) == own_path.as_deref()
+                    || (own_bundle.is_some() && bundle_dir(&path).map(str::to_string) == own_bundle);
+                if !same_app {
+                    let info = self.by_path.entry(path.clone()).or_insert_with(|| describe(&path));
+                    if let Some(label) = info.label() {
+                        found = Some(label);
                         break;
                     }
                 }
@@ -168,6 +184,8 @@ mod tests {
         assert_eq!(i.process, "2.1.319");
         assert_eq!(i.name.as_deref(), Some("Claude Code"));
         assert_eq!(i.version.as_deref(), Some("2.1.319"));
+        assert_eq!(i.label().as_deref(), Some("Claude Code 2.1.319"));
+        assert_eq!(describe("/usr/libexec/nsurlsessiond").label(), None);
         assert_eq!(versioned_binary("/usr/bin/curl"), None);
         assert_eq!(versioned_binary("/opt/x/versions/notes"), None);
     }
@@ -188,7 +206,7 @@ mod tests {
         // Whatever launched the test binary, walking up must not panic or loop; from a terminal
         // it names the terminal app (login is root-owned, so this exercises the ps fallback).
         let via = Resolver::default().via(me);
-        eprintln!("via = {via:?}");
+        eprintln!("via = {via:?}"); // under Claude Code in a terminal: Some("Claude Code x.y.z")
     }
 
     #[test]

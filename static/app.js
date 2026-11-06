@@ -58,16 +58,23 @@ window.nm = (() => {
     for (const c of d.connections) { c.raw = c.process; c.via = d.via?.[c.process] ?? null; c.process = appName(c.process); }
     return d;
   }
-  /** Group per-process counts under the app each was launched from: [{ name, n, live, children: [...] }]. */
+  /** Nest per-process counts under the app each was launched from, to any depth
+   *  (Zentty > Claude Code > gh). Returns [[node, depth], ...] in display order; node.n is the subtree total. */
   function groupByVia(items) {
-    const top = new Map();
-    const get = (name) => top.get(name) ?? top.set(name, { name, n: 0, own: 0, live: false, children: [] }).get(name);
-    for (const it of items) {
-      if (it.via && it.via !== it.name) { const g = get(it.via); g.children.push(it); g.n += it.n; g.live ||= it.live; }
-      else { const g = get(it.name); g.own = it.n; g.n += it.n; g.live ||= it.live; }
-    }
-    for (const g of top.values()) g.children.sort((a, b) => b.n - a.n);
-    return [...top.values()].sort((a, b) => b.n - a.n);
+    const nodes = new Map();
+    const node = (name) => nodes.get(name) ?? nodes.set(name, { name, n: 0, own: 0, live: false, via: null, children: [] }).get(name);
+    for (const it of items) { const g = node(it.name); g.own = it.n; g.live ||= !!it.live; if (it.via && it.via !== it.name) g.via = it.via; }
+    for (const g of [...nodes.values()]) if (g.via) node(g.via).children.push(g);
+    const seen = new Set();
+    const total = (g) => { if (seen.has(g)) return 0; seen.add(g); g.n = g.own + g.children.reduce((s, c) => s + total(c), 0); g.live ||= g.children.some((c) => c.live); g.children.sort((a, b) => b.n - a.n); return g.n; };
+    const roots = [...nodes.values()].filter((g) => !g.via);
+    for (const r of roots) total(r);
+    for (const g of nodes.values()) if (!seen.has(g)) { g.via = null; roots.push(g); total(g); } // a cycle: show it at the top
+    roots.sort((a, b) => b.n - a.n);
+    const out = [];
+    const walk = (g, d) => { out.push([g, d]); for (const c of g.children) walk(c, d + 1); };
+    for (const r of roots) walk(r, 0);
+    return out;
   }
 
   // Stable per-app hue; lightness suits the surface so dots read on both themes.

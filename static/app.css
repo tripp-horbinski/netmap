@@ -174,8 +174,9 @@ ul.list { list-style: none; margin: 0; padding: 0; }
 .list a.row:hover { text-decoration: none; }
 .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; display: inline-block; }
 .dot.live { box-shadow: 0 0 0 3px var(--accent-soft); }
-/* rows nested under the app that launched them (via) */
-.list li.sub { padding-left: 24px; }
+/* rows nested under the app that launched them (via); --d is the depth */
+.list li.sub { padding-left: calc(8px + 18px * var(--d, 1)); }
+.bars li.sub { padding-left: calc(8px + 18px * var(--d, 1)); }
 .list li.sub .name::before, .bars li.sub .name::before { content: '↳ '; color: var(--dim); }
 /* bar list: a row with a proportional wash behind it */
 .bars li { display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 4px 8px; border-radius: 6px;

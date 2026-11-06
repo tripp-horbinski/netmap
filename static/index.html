@@ -191,10 +191,10 @@ function render() {
   }
   const top = (m, n) => [...m].map(([name, s]) => ({ name, n: s.size })).sort((a, b) => b.n - a.n).slice(0, n);
   // Apps grouped under the app that launched them (via): parent rows carry the group total.
-  const appGroups = nm.groupByVia([...byApp].map(([name, s]) => ({ name, n: s.size, via: viaOf.get(name) ?? null })));
-  const maxApp = Math.max(1, ...appGroups.map((g) => g.n));
-  const bar = (name, n, sub) => `<li class="${sub ? 'sub' : ''}" style="--w:${(100 * n / maxApp).toFixed(1)}%"><span class="name">${esc(name)}</span><span class="n">${fmtN(n)}</span></li>`;
-  $('apps').innerHTML = appGroups.slice(0, 10).map((g) => bar(g.name, g.n, false) + g.children.slice(0, 6).map((c) => bar(c.name, c.n, true)).join('')).join('') || '<li class="muted">Waiting for connections…</li>';
+  const tree = nm.groupByVia([...byApp].map(([name, s]) => ({ name, n: s.size, via: viaOf.get(name) ?? null })));
+  const maxApp = Math.max(1, ...tree.filter(([, d]) => d === 0).map(([g]) => g.n));
+  const bar = ([g, d]) => `<li class="${d ? 'sub' : ''}" style="--d:${d};--w:${(100 * g.n / maxApp).toFixed(1)}%"><span class="name">${esc(g.name)}</span><span class="n">${fmtN(g.n)}</span></li>`;
+  $('apps').innerHTML = tree.slice(0, 16).map(bar).join('') || '<li class="muted">Waiting for connections…</li>';
   $('orgs').innerHTML = bars(top(byOrg, 10), 'Waiting for connections…');
   const seen = new Map();
   for (const c of conns) if (!seen.has(c.ip) || c.first_seen < seen.get(c.ip).first_seen) seen.set(c.ip, c);
