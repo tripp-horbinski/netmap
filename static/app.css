@@ -273,6 +273,21 @@ svg.spark rect.now { fill: var(--text); }
 .graph g.site:hover text, .graph g.org:hover text { fill: var(--accent); }
 .graph-table { margin-top: 10px; }
 
+/* ---- companies: reach as a stacked bar per company ------------------------------------ */
+.reach { display: grid; grid-template-columns: 220px 1fr 60px; gap: 10px; align-items: center; padding: 3px 4px; border-radius: 4px; max-width: 900px; }
+.reach:hover { background: var(--panel-2); }
+.reach .org { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.reach .org:hover { color: var(--accent); }
+.reach .bar { display: flex; height: 12px; gap: 2px; }
+.reach .bar i { display: block; height: 100%; border-radius: 3px; min-width: 3px; }
+.reach .bar i.s { background: var(--series-1); } .reach .bar i.a { background: var(--series-2); } .reach .bar i.d { background: var(--series-3); }
+.reach .n { font-size: 12px; }
+:root { --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a; }
+@media (prefers-color-scheme: dark) { :root:where(:not([data-theme="light"])) { --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; } }
+:root[data-theme="dark"] { --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; }
+.cols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; max-width: 900px; }
+@media (max-width: 900px) { .cols { grid-template-columns: 1fr; } }
+
 /* ---- app icons -------------------------------------------------------------------------- */
 .app-ic { position: relative; display: inline-grid; place-items: center; width: var(--s, 20px); height: var(--s, 20px);
           border-radius: 22%; background: var(--c, var(--line-2)); color: #fff; flex: none; vertical-align: middle; overflow: hidden; }

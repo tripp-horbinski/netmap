@@ -118,7 +118,7 @@ window.nm = (() => {
   }
 
   // ---- nav ------------------------------------------------------------------------------
-  const PAGES = [['/', 'Overview'], ['/map', 'Map'], ['/devices', 'Devices'], ['/sites', 'Sites']];
+  const PAGES = [['/', 'Overview'], ['/map', 'Map'], ['/devices', 'Devices'], ['/sites', 'Sites'], ['/companies', 'Companies']];
   function nav(active) {
     const el = document.getElementById('nav');
     el.className = 'nav';

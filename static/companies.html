@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>netmap · companies</title>
+<script>try{const t=localStorage.getItem('nm-theme');if(t)document.documentElement.dataset.theme=t}catch{}</script>
+<link rel="stylesheet" href="app.css">
+<script src="app.js"></script>
+<style>
+  .list li.row { grid-template-columns: 1fr 44px 44px 44px; }
+  input.filter { margin-top: 10px; }
+  .head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .tiles { margin: 16px 0; max-width: 900px; }
+  .legend { display: flex; gap: 14px; color: var(--dim); font-size: 11px; margin: 6px 0 8px; }
+  .legend i { display: inline-block; width: 10px; height: 8px; border-radius: 3px; margin-right: 4px; vertical-align: middle; }
+  .list li.hdr { cursor: default; color: var(--dim); font-size: 10px; text-transform: uppercase; letter-spacing: .06em; padding-bottom: 0; }
+  .list li.hdr:hover { background: none; }
+</style>
+</head>
+<body>
+<header id="nav"></header>
+<div class="shell">
+<aside>
+  <h1>Companies</h1>
+  <div class="sub">Who sees you, across apps, sites and devices</div>
+  <div class="seg wide" id="window">
+    <button data-w="1h">1h</button><button data-w="24h">24h</button>
+    <button data-w="7d">7d</button><button data-w="all">All</button>
+  </div>
+  <input class="filter" id="filter" type="search" placeholder="Filter companies…">
+  <h2>Companies <span class="muted" id="count"></span></h2>
+  <ul class="list" id="companies"><li class="muted">Loading…</li></ul>
+</aside>
+<main id="main"><div class="empty">Loading…</div></main>
+</div>
+
+<script>
+const { esc, fmtN, ago, rows } = nm;
+const $ = (id) => document.getElementById(id);
+const state = { win: '24h', org: null, list: [], detail: null, q: '', table: false };
+nm.nav('/companies');
+nm.stream();
+
+function renderList() {
+  const q = state.q.toLowerCase();
+  const list = state.list.filter((c) => !q || c.org.toLowerCase().includes(q));
+  $('count').textContent = list.length ? `(${list.length})` : '';
+  if (!list.length) { $('companies').innerHTML = '<li class="muted">Nothing in this window.</li>'; return; }
+  $('companies').innerHTML = `<li class="row hdr"><span></span><span class="n">sites</span><span class="n">apps</span><span class="n">devices</span></li>` +
+    list.map((c) => `
+    <li class="row${c.org === state.org ? ' sel' : ''}" data-org="${esc(c.org)}">
+      <div class="name">${esc(c.org)}${c.tracker ? '<span class="tag">tracker</span>' : ''}<small>${fmtN(c.hosts)} host${c.hosts === 1 ? '' : 's'} · ${ago(c.last)}</small></div>
+      <div class="n">${fmtN(c.sites)}</div><div class="n">${fmtN(c.apps)}</div><div class="n">${fmtN(c.devices)}</div>
+    </li>`).join('');
+  for (const li of $('companies').querySelectorAll('li.row[data-org]')) li.onclick = () => select(li.dataset.org);
+}
+
+// Default view: reach per company as a stacked bar (sites, apps, devices), top 20.
+function renderOverview() {
+  const list = state.list.slice(0, 20);
+  if (!list.length) { $('main').innerHTML = '<div class="empty">No data in this window.</div>'; return; }
+  const max = Math.max(1, ...list.map((c) => c.reach));
+  const legend = `<div class="legend"><span><i style="background:var(--series-1)"></i>sites</span><span><i style="background:var(--series-2)"></i>apps on this Mac</span><span><i style="background:var(--series-3)"></i>LAN devices</span></div>`;
+  $('main').innerHTML = `
+    <div class="head"><h3>Who sees you</h3><span class="muted">${fmtN(state.list.length)} companies behind this window's traffic · reach = sites + apps + devices</span>
+      <button class="btn small" id="toggle" style="margin-left:auto">${state.table ? 'Chart' : 'Table'}</button></div>
+    ${state.table ? rows(state.list, [
+      { h: 'company', f: (c) => `<a href="#${encodeURIComponent(c.org)}">${esc(c.org)}</a>` + (c.tracker ? '<span class="tag">tracker</span>' : '') },
+      { h: 'sites', n: true, f: (c) => fmtN(c.sites) }, { h: 'third-party', n: true, f: (c) => fmtN(c.third_party_sites) },
+      { h: 'apps', n: true, f: (c) => fmtN(c.apps) }, { h: 'devices', n: true, f: (c) => fmtN(c.devices) },
+      { h: 'hosts', n: true, f: (c) => fmtN(c.hosts) }, { h: 'last', n: true, f: (c) => ago(c.last) },
+    ], 'Nothing.')
+    : legend + list.map((c) => `
+      <div class="reach">
+        <span class="org" data-org="${esc(c.org)}" title="${esc(c.org)}">${esc(c.org)}${c.tracker ? '<span class="tag">tracker</span>' : ''}</span>
+        <span class="bar" title="${fmtN(c.sites)} sites · ${fmtN(c.apps)} apps · ${fmtN(c.devices)} devices">
+          ${c.sites ? `<i class="s" style="width:${(100 * c.sites / max).toFixed(1)}%"></i>` : ''}${c.apps ? `<i class="a" style="width:${(100 * c.apps / max).toFixed(1)}%"></i>` : ''}${c.devices ? `<i class="d" style="width:${(100 * c.devices / max).toFixed(1)}%"></i>` : ''}
+        </span>
+        <span class="n">${fmtN(c.reach)}</span>
+      </div>`).join('')}
+    <p class="note">A company is the network owner behind an IP (DB-IP's ASN data). Sites count the sites you visited whose loads pulled in one of its hosts;
+      apps count processes on this Mac that connected to it; devices count LAN devices whose DNS lookups resolved to its addresses. Click a company for the lists behind each number.</p>`;
+  $('toggle').onclick = () => { state.table = !state.table; renderOverview(); };
+  for (const el of $('main').querySelectorAll('.org[data-org]')) el.onclick = () => select(el.dataset.org);
+}
+
+function renderDetail() {
+  const d = state.detail;
+  if (!d) { renderOverview(); return; }
+  const via = (v) => v.map((x) => `<span class="tag fp">${x}</span>`).join('');
+  $('main').innerHTML = `
+    <div class="head"><button class="btn small" id="back" title="Back to all companies">← all companies</button><h3>${esc(d.org)}</h3>${d.tracker ? '<span class="tag">tracker</span>' : ''}</div>
+    <div class="muted">last seen ${ago(d.last)}</div>
+    <div class="tiles">
+      <div class="tile"><div class="label">Sites</div><div class="value">${fmtN(d.sites)}</div><div class="sub muted">${fmtN(d.third_party_sites)} as a third party</div></div>
+      <div class="tile"><div class="label">Apps on this Mac</div><div class="value">${fmtN(d.apps)}</div></div>
+      <div class="tile"><div class="label">LAN devices</div><div class="value">${fmtN(d.devices)}</div></div>
+      <div class="tile"><div class="label">Hosts</div><div class="value">${fmtN(d.hosts)}</div></div>
+    </div>
+    <div class="cols">
+      <div><h2>Sites</h2>${rows(d.site_list, [
+        { h: 'site', f: (r) => `<a href="/sites#${encodeURIComponent(r.site)}">${esc(r.site)}</a>${r.third_party ? '' : '<span class="tag fp">first party</span>'}` },
+        { h: 'hosts', n: true, f: (r) => fmtN(r.hosts) }], 'None.')}</div>
+      <div><h2>Apps</h2>${rows(d.app_list, [
+        { h: 'app', f: (r) => `<a href="/map#app=${encodeURIComponent(nm.appName(r.app))}">${esc(nm.appName(r.app))}</a>` },
+        { h: 'hosts', n: true, f: (r) => fmtN(r.hosts) }, { h: 'last', n: true, f: (r) => ago(r.last) }], 'None.')}</div>
+      <div><h2>Devices</h2>${rows(d.device_list, [
+        { h: 'device', f: (r) => `<a href="/devices#${encodeURIComponent(r.ip)}">${esc(r.device)}</a>` },
+        { h: 'names', n: true, f: (r) => fmtN(r.names) }, { h: 'last', n: true, f: (r) => ago(r.last) }], 'None.')}</div>
+    </div>
+    <h2>Hosts</h2>
+    ${rows(d.host_list.slice(0, 80), [
+      { h: 'host', f: (r) => esc(r.host) + (r.tracker ? '<span class="tag">tracker</span>' : '') },
+      { h: 'seen via', f: (r) => via(r.via) },
+    ], 'None.')}`;
+  $('back').onclick = () => { state.org = null; history.replaceState(null, '', ' '); refresh(); };
+}
+
+async function select(org) {
+  state.org = org;
+  history.replaceState(null, '', `#${encodeURIComponent(org)}`);
+  await refresh();
+}
+
+async function refresh() {
+  const q = `since=${encodeURIComponent(state.win)}`;
+  const [list, detail] = await Promise.all([
+    fetch(`/api/companies?${q}`).then((r) => r.json()),
+    state.org ? fetch(`/api/companies/${encodeURIComponent(state.org)}?${q}`).then((r) => (r.ok ? r.json() : null)) : null,
+  ]);
+  state.list = list; state.detail = detail;
+  renderList(); renderDetail();
+}
+
+nm.segment($('window'), state.win, (w) => { state.win = w; refresh(); });
+$('filter').oninput = () => { state.q = $('filter').value.trim(); renderList(); };
+state.org = decodeURIComponent(location.hash.slice(1)) || null;
+window.addEventListener('hashchange', () => { state.org = decodeURIComponent(location.hash.slice(1)) || null; refresh(); });
+refresh();
+setInterval(refresh, 20000);
+</script>
+</body>
+</html>

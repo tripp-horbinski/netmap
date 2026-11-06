@@ -16,6 +16,7 @@ import { LanDb } from "./lan";
 import { SitesDb } from "./sites";
 import { BrowserDb } from "./browser";
 import { FindingsDb } from "./findings";
+import { CompaniesDb } from "./companies";
 import { Tracer, isIp } from "./trace";
 
 const COMPILED = import.meta.dir.startsWith("/$bunfs");
@@ -68,6 +69,7 @@ const lan = new LanDb(db.db);
 const browser = new BrowserDb(db.db, geo);
 const sites = new SitesDb(db.db, browser);
 const findings = new FindingsDb(db.db, sites);
+const companies = new CompaniesDb(db.db, geo, sites);
 const home = await findHome(args.home, geo);
 const tracer = new Tracer(db.db, geo);
 
@@ -227,6 +229,18 @@ const server = Bun.serve({
     "/map": { GET: () => staticFile("/map.html") },
     "/devices": { GET: () => staticFile("/devices.html") },
     "/sites": { GET: () => staticFile("/sites.html") },
+    "/companies": { GET: () => staticFile("/companies.html") },
+    "/api/companies": { GET: withWindow((w) => companies.list(w)) },
+    "/api/companies/:org": {
+      GET: (req) => {
+        try {
+          const d = companies.detail(decodeURIComponent(req.params.org), windowOf(req));
+          return d ? json(d) : json({ error: "no such company in this window" }, 404);
+        } catch (e) {
+          return json({ error: String(e instanceof Error ? e.message : e) }, 400);
+        }
+      },
+    },
     "/api/sites": { GET: (req) => withWindow((w) => sites.sites(w, browsersOnly(req)))(req) },
     "/api/trace/:ip": {
       GET: async (req) => {

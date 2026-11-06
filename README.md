@@ -89,6 +89,12 @@ With no site selected the page shows the dependency graph: the sites with the bi
 footprint on the left, the companies serving those hosts on the right, one ribbon per pair, hover for
 the host names, a table view behind the *Table* button. `GET /api/sites/graph?since=24h`.
 
+`/companies` is the rollup: every company (the network owner behind an IP, from DB-IP's ASN data)
+ranked by reach, which is how many sites it appeared in, how many apps on this Mac connected to it,
+and how many LAN devices resolved names to its addresses. A stacked bar per company shows the three,
+with a table view; click one for the sites, apps, devices and hosts behind each number.
+`GET /api/companies?since=24h`, `GET /api/companies/ORG?since=24h`.
+
 ## Naming every connection's process (pktap, root)
 
 `lsof` polling only sees connections that live longer than the poll and only processes running
