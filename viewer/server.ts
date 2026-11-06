@@ -171,8 +171,16 @@ async function appIcon(name: string, cli: boolean): Promise<Response> {
   const base = name.replace(/ \[(headless|automated)\]$/, "").replace(/ \((headless|automated)\)$/, "");
   const row = iconQ.get(base, base, base);
   // Claude Code is a bare binary; the Claude desktop app's icon stands in for it when installed.
-  const bundle = row?.path?.match(/^(.*?\.app)\//)?.[1]
+  let bundle = row?.path?.match(/^(.*?\.app)\//)?.[1]
     ?? (row?.name === "Claude Code" || /^Claude Code/.test(base) ? "/Applications/Claude.app" : undefined);
+  // An app that has not connected since the database was last cleared has no row yet; an app
+  // launched others (a terminal) still deserves its icon, so look for a bundle by name.
+  if (!bundle) {
+    for (const dir of ["/Applications", `${process.env.HOME}/Applications`, "/System/Applications", "/System/Applications/Utilities"]) {
+      const candidate = join(dir, `${base}.app`);
+      if (await Bun.file(join(candidate, "Contents/Info.plist")).exists()) { bundle = candidate; break; }
+    }
+  }
   const icns = (bundle && (await bundleIcns(bundle))) || (cli ? TERMINAL_ICNS : GENERIC_ICNS);
   const key = new Bun.CryptoHasher("sha1").update(icns).digest("hex").slice(0, 16);
   const png = join(ICONS, `${key}.png`);
