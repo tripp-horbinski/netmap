@@ -32,8 +32,7 @@ if (/^#trace=/.test(location.hash)) location.replace('/map' + location.hash);</s
   <div class="strip" id="tiles"></div>
 
   <div class="card"><h2>Where it goes <a href="/map">open the map →</a></h2><div id="mini"></div></div>
-  <div class="card"><h2>Live <span class="muted" id="rate"></span></h2><ul class="list feed" id="live"><li class="muted">Waiting for new connections…</li></ul></div>
-  <p class="note">Detail lives on the other pages: <a href="/map">map</a> for apps and destinations, <a href="/devices">devices</a> for the LAN, <a href="/sites">sites</a> for what each site pulls in.</p>
+  <p class="note">Detail lives on the other pages: <a href="/map">map</a> for the live feed, apps and destinations, <a href="/devices">devices</a> for the LAN, <a href="/sites">sites</a> for what each site pulls in.</p>
 </div>
 
 <script>
@@ -168,14 +167,6 @@ function render() {
 }
 
 // ---- live feed + ripples on the mini map --------------------------------------------------------
-function renderLive() {
-  const ev = nm.live.events.slice(0, 10), now = Date.now() / 1000;
-  const n = nm.perMinute();
-  $('rate').textContent = ev.length ? `· ${n}${n >= 60 ? '+' : ''} in the last minute` : '';
-  if (!ev.length) return;
-  $('live').innerHTML = ev.map((e) => `<li data-id="${e.id}"><span class="dot" style="background:${color(e.app)}"></span><span class="name"><b>${esc(e.app)}</b>${e.via ? ` <span class="muted">via ${esc(e.via)}</span>` : ''}${e.site ? ` · ${esc(e.site)}` : ''} → ${esc(e.host || e.org || e.ip)}</span><span class="t">${ago(e.ts)}</span></li>`).join('');
-  $('live').firstElementChild.classList.add('new');
-}
 let flashing = 0;
 function flash(e) {
   if (e.lat == null || flashing > 20) return;
@@ -199,8 +190,7 @@ function flash(e) {
   requestAnimationFrame(step);
 }
 let pollTimer = null;
-nm.stream((e) => { renderLive(); flash(e); if (!pollTimer) pollTimer = setTimeout(() => { pollTimer = null; poll(); }, 500); });
-setInterval(renderLive, 5000);
+nm.stream((e) => { flash(e); if (!pollTimer) pollTimer = setTimeout(() => { pollTimer = null; poll(); }, 500); });
 
 // ---- findings: what changed against the baseline ----------------------------------------------
 function renderFindings() {
