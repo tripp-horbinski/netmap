@@ -17,6 +17,8 @@ import { SitesDb } from "./sites";
 import { BrowserDb } from "./browser";
 import { FindingsDb } from "./findings";
 import { CompaniesDb } from "./companies";
+import { AppReportDb } from "./appreport";
+import { appName as productName } from "./appname";
 import { Tracer, isIp } from "./trace";
 
 const COMPILED = import.meta.dir.startsWith("/$bunfs");
@@ -70,6 +72,7 @@ const browser = new BrowserDb(db.db, geo);
 const sites = new SitesDb(db.db, browser);
 const findings = new FindingsDb(db.db, sites);
 const companies = new CompaniesDb(db.db, geo, sites);
+const reports = new AppReportDb(db.db);
 const home = await findHome(args.home, geo);
 const tracer = new Tracer(db.db, geo);
 
@@ -171,7 +174,14 @@ async function bundleIcns(bundle: string): Promise<string | null> {
 /** The icon for a process, bundle name or "Name version"; `cli` picks the Terminal stand-in over the generic one. */
 async function appIcon(req: Request, name: string, cli: boolean): Promise<Response> {
   const base = name.replace(/ \[(headless|automated)\]$/, "").replace(/ \((headless|automated)\)$/, "");
-  const row = iconQ.get(base, base, base);
+  let row = iconQ.get(base, base, base);
+  if (!row) {
+    // A product name ("Chrome") that is neither a process nor a bundle name: find a process that displays as it.
+    const all = db.apps();
+    const byProcess = new Map(all.map((a) => [a.process, a]));
+    const match = all.find((a) => productName(a.process, byProcess) === base && a.path?.includes(".app/")) ?? all.find((a) => productName(a.process, byProcess) === base);
+    if (match) row = { path: match.path, name: match.name };
+  }
   // Claude Code is a bare binary; the Claude desktop app's icon stands in for it when installed.
   let bundle = row?.path?.match(/^(.*?\.app)\//)?.[1]
     ?? (row?.name === "Claude Code" || /^Claude Code/.test(base) ? "/Applications/Claude.app" : undefined);
@@ -230,6 +240,18 @@ const server = Bun.serve({
     "/devices": { GET: () => staticFile("/devices.html") },
     "/sites": { GET: () => staticFile("/sites.html") },
     "/companies": { GET: () => staticFile("/companies.html") },
+    "/apps": { GET: () => staticFile("/apps.html") },
+    "/api/apps/report": { GET: withWindow((w) => reports.list(w)) },
+    "/api/apps/report/:name": {
+      GET: (req) => {
+        try {
+          const c = reports.card(decodeURIComponent(req.params.name), windowOf(req));
+          return c ? json(c) : json({ error: "no connections from that app in this window" }, 404);
+        } catch (e) {
+          return json({ error: String(e instanceof Error ? e.message : e) }, 400);
+        }
+      },
+    },
     "/api/companies": { GET: withWindow((w) => companies.list(w)) },
     "/api/companies/:org": {
       GET: (req) => {

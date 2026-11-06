@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>hazel · apps</title>
+<link rel="icon" href="/hazel.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon.png" type="image/png" sizes="64x64">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<script>try{const t=localStorage.getItem('nm-theme');if(t)document.documentElement.dataset.theme=t}catch{}</script>
+<link rel="stylesheet" href="app.css">
+<script src="app.js"></script>
+<style>
+  input.filter { margin-top: 10px; }
+  .head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .head .meta { color: var(--dim); font-size: 12px; }
+  .tiles { margin: 16px 0; max-width: 900px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 12px; color: var(--dim); font-size: 11px; margin: 8px 0; }
+  .legend i { display: inline-block; width: 10px; height: 8px; border-radius: 3px; margin-right: 4px; vertical-align: middle; }
+  .cols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; max-width: 900px; }
+  @media (max-width: 900px) { .cols { grid-template-columns: 1fr; } }
+  .chart { max-width: 900px; }
+</style>
+</head>
+<body>
+<header id="nav"></header>
+<div class="shell">
+<aside>
+  <h1>Apps</h1>
+  <div class="sub">What each app sends, and to whom</div>
+  <div class="seg wide" id="window">
+    <button data-w="1h">1h</button><button data-w="24h">24h</button>
+    <button data-w="7d">7d</button><button data-w="all">All</button>
+  </div>
+  <input class="filter" id="filter" type="search" placeholder="Filter apps…">
+  <h2>Apps <span class="muted" id="count"></span></h2>
+  <ul class="list" id="apps"><li class="muted">Loading…</li></ul>
+</aside>
+<main id="main"><div class="empty">Loading…</div></main>
+</div>
+
+<script>
+const { esc, fmtN, ago, when, rows, spark } = nm;
+const $ = (id) => document.getElementById(id);
+const state = { win: '24h', name: null, list: [], card: null, q: '' };
+nm.nav('/apps');
+nm.stream();
+
+const CLASSES = [['first-party', 'first party'], ['update', 'update check'], ['telemetry', 'telemetry'], ['ads', 'ads & tracking'], ['cdn', 'CDN / cloud'], ['other', 'other']];
+const clsTag = (c) => `<span class="tag cls"><i class="c-${c}"></i>${esc(CLASSES.find(([k]) => k === c)?.[1] ?? c)}</span>`;
+const segbar = (by, tall = false) => {
+  const total = Object.values(by).reduce((a, b) => a + b, 0) || 1;
+  return `<div class="segbar${tall ? ' tall' : ''}" title="${CLASSES.map(([k, l]) => `${l} ${by[k] ?? 0}`).join(' · ')}">${CLASSES.filter(([k]) => by[k]).map(([k, l]) =>
+    `<i class="c-${k}" style="width:${(100 * by[k] / total).toFixed(1)}%" title="${l}: ${by[k]} host${by[k] === 1 ? '' : 's'}">${tall && by[k] / total > 0.12 ? Math.round(100 * by[k] / total) + '%' : ''}</i>`).join('')}</div>`;
+};
+const legend = `<div class="legend">${CLASSES.map(([k, l]) => `<span><i class="c-${k}"></i>${l}</span>`).join('')}</div>`;
+const isCli = (a) => a.via.length > 0 && !a.bundle_id;
+
+function renderList() {
+  const q = state.q.toLowerCase();
+  const list = state.list.filter((a) => !q || a.name.toLowerCase().includes(q));
+  $('count').textContent = list.length ? `(${list.length})` : '';
+  if (!list.length) { $('apps').innerHTML = '<li class="muted">No connections in this window.</li>'; return; }
+  $('apps').innerHTML = list.map((a) => `
+    <li class="row app${a.name === state.name ? ' sel' : ''}" data-name="${esc(a.name)}">
+      ${nm.appIcon(a.name, { size: 24, cli: isCli(a) })}
+      <div class="name">${esc(a.name)}<small>${fmtN(a.hosts)} host${a.hosts === 1 ? '' : 's'} · ${fmtN(a.companies)} compan${a.companies === 1 ? 'y' : 'ies'} · ${ago(a.last)}</small>${segbar(a.by_class)}</div>
+      <div class="n" title="destinations">${fmtN(a.destinations)}</div>
+    </li>`).join('');
+  for (const li of $('apps').querySelectorAll('li.row[data-name]')) li.onclick = () => select(li.dataset.name);
+}
+
+function renderOverview() {
+  if (!state.list.length) { $('main').innerHTML = '<div class="empty">No connections in this window.</div>'; return; }
+  const totals = {};
+  for (const a of state.list) for (const [k, v] of Object.entries(a.by_class)) totals[k] = (totals[k] ?? 0) + v;
+  $('main').innerHTML = `
+    <div class="head"><h3>Report cards</h3><span class="muted">${fmtN(state.list.length)} apps · hosts by what they are for</span></div>
+    ${legend}
+    <div class="chart">${segbar(totals, true)}</div>
+    <h2>By app</h2>
+    ${rows(state.list, [
+      { h: 'app', f: (a) => `${nm.appIcon(a.name, { size: 18, cli: isCli(a) })} <a href="#${encodeURIComponent(a.name)}">${esc(a.name)}</a>${a.version && !a.name.endsWith(a.version) ? ` <span class="muted">${esc(a.version)}</span>` : ''}` },
+      { h: 'hosts', f: (a) => `<div style="min-width:160px">${segbar(a.by_class)}</div>` },
+      { h: 'telemetry', n: true, f: (a) => fmtN(a.by_class.telemetry) }, { h: 'ads', n: true, f: (a) => fmtN(a.by_class.ads) },
+      { h: 'destinations', n: true, f: (a) => fmtN(a.destinations) }, { h: 'companies', n: true, f: (a) => fmtN(a.companies) },
+      { h: 'launched from', f: (a) => esc(a.via.slice(0, 2).join(', ')) },
+    ], 'Nothing.')}
+    <p class="note">First party is the app's own domains (from its bundle id and update feed); update checks are hosts named like updates or releases; telemetry is crash and analytics vendors
+      (Sentry, Datadog, Segment, Firebase…); ads is netlog's tracker list; CDN is shared edge infrastructure. Click an app for its card.</p>`;
+}
+
+function renderCard() {
+  const c = state.card;
+  if (!c) { renderOverview(); return; }
+  let feedHost = null;
+  if (c.feed_url) { try { feedHost = new URL(c.feed_url).hostname; } catch { feedHost = c.feed_url; } }
+  const bundlePath = c.path ? c.path.replace(/\/Contents\/.*$/, '') : null;
+  const meta = [c.bundle_id, bundlePath, feedHost ? `updates from ${feedHost}` : null, c.via.length ? `launched from ${c.via.join(', ')}` : null].filter(Boolean).map(esc).join(' · ') || esc(c.processes.join(', '));
+  $('main').innerHTML = `
+    <div class="head"><button class="btn small" id="back">← all apps</button>${nm.appIcon(c.name, { size: 36, cli: isCli(c) })}
+      <div><h3>${esc(c.name)}${c.version && !c.name.endsWith(c.version) ? ` <span class="muted">${esc(c.version)}</span>` : ''}</h3><div class="meta">${meta}</div></div>
+      <a class="btn small" href="/map#app=${encodeURIComponent(c.name)}" style="margin-left:auto">map →</a></div>
+    <div class="tiles">
+      <div class="tile"><div class="label">Hosts</div><div class="value">${fmtN(c.hosts)}</div><div class="sub muted">${fmtN(c.destinations)} destinations</div></div>
+      <div class="tile"><div class="label">Companies</div><div class="value">${fmtN(c.companies)}</div><div class="sub muted">${c.country_list.length} countr${c.country_list.length === 1 ? 'y' : 'ies'}</div></div>
+      <div class="tile"><div class="label">Telemetry hosts</div><div class="value${c.by_class.telemetry ? ' warn' : ''}">${fmtN(c.by_class.telemetry)}</div></div>
+      <div class="tile"><div class="label">Ad &amp; tracking hosts</div><div class="value${c.by_class.ads ? ' warn' : ''}">${fmtN(c.by_class.ads)}</div></div>
+    </div>
+    <h2>What its hosts are for</h2>
+    ${legend}
+    <div class="chart">${segbar(c.by_class, true)}</div>
+    <h2>Opens over time</h2>
+    <div class="chart">${spark(c.bins, c.window, { label: 'opens' })}<div class="axis"><span>${when(c.window.start)}</span><span>now</span></div></div>
+    <div class="cols">
+      <div><h2>Companies</h2>${rows(c.company_list, [
+        { h: 'company', f: (r) => `<a href="/companies#${encodeURIComponent(r.org)}">${esc(r.org)}</a>` },
+        { h: 'hosts', n: true, f: (r) => fmtN(r.hosts) }, { h: 'as', f: (r) => r.classes.map(clsTag).join(' ') }], 'None.')}</div>
+      <div><h2>Countries</h2>${rows(c.country_list, [{ h: 'country', f: (r) => esc(r.country) }, { h: 'hosts', n: true, f: (r) => fmtN(r.hosts) }], 'None.')}</div>
+      <div><h2>Launched from</h2>${rows(c.via_list, [{ h: 'app', f: (r) => esc(r.via) }, { h: 'opens', n: true, f: (r) => fmtN(r.opens) }], 'Nothing: it starts on its own.')}</div>
+    </div>
+    <h2>Hosts</h2>
+    ${rows(c.host_list.slice(0, 120), [
+      { h: 'host', f: (r) => esc(r.host) }, { h: 'for', f: (r) => clsTag(r.cls) },
+      { h: 'company', f: (r) => esc(r.org ?? '') }, { h: 'country', f: (r) => esc(r.country ?? '') },
+      { h: 'opens', n: true, f: (r) => fmtN(r.opens) }, { h: 'last', n: true, f: (r) => ago(r.last) },
+    ], 'None.')}`;
+  $('back').onclick = () => { state.name = null; history.replaceState(null, '', ' '); refresh(); };
+}
+
+async function select(name) {
+  state.name = name;
+  history.replaceState(null, '', `#${encodeURIComponent(name)}`);
+  await refresh();
+}
+
+async function refresh() {
+  const q = `since=${encodeURIComponent(state.win)}`;
+  const [list, card] = await Promise.all([
+    fetch(`/api/apps/report?${q}`).then((r) => r.json()),
+    state.name ? fetch(`/api/apps/report/${encodeURIComponent(state.name)}?${q}`).then((r) => (r.ok ? r.json() : null)) : null,
+  ]);
+  state.list = list; state.card = card;
+  renderList(); renderCard();
+}
+
+nm.segment($('window'), state.win, (w) => { state.win = w; refresh(); });
+$('filter').oninput = () => { state.q = $('filter').value.trim(); renderList(); };
+state.name = decodeURIComponent(location.hash.slice(1)) || null;
+window.addEventListener('hashchange', () => { state.name = decodeURIComponent(location.hash.slice(1)) || null; refresh(); });
+refresh();
+setInterval(refresh, 20000);
+</script>
+</body>
+</html>

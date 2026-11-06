@@ -93,6 +93,12 @@ With no site selected the page shows the dependency graph: the sites with the bi
 footprint on the left, the companies serving those hosts on the right, one ribbon per pair, hover for
 the host names, a table view behind the *Table* button. `GET /api/sites/graph?since=24h`.
 
+`/apps` is the report card per app (helpers merged under the product name): bundle, version and
+update feed, who launched it, opens over time, and every host it reached classified as first party
+(from the bundle id and feed domain), update check, telemetry (crash and analytics vendors), ads
+(the tracker list), CDN, or other, as a segmented bar and a table, with companies and countries.
+`GET /api/apps/report?since=24h`, `GET /api/apps/report/NAME?since=24h`.
+
 `/companies` is the rollup: every company (the network owner behind an IP, from DB-IP's ASN data)
 ranked by reach, which is how many sites it appeared in, how many apps on this Mac connected to it,
 and how many LAN devices resolved names to its addresses. A stacked bar per company shows the three,

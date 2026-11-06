@@ -177,6 +177,14 @@ impl Resolver {
         Some(self.by_path.entry(path.clone()).or_insert_with(|| describe(&path)).clone())
     }
 
+    /// Like `for_pid`, but re-reads the bundle so a version change after an update is seen.
+    pub fn refresh_pid(&mut self, pid: i32) -> Option<AppInfo> {
+        let path = exe_path(pid)?;
+        let info = describe(&path);
+        self.by_path.insert(path, info.clone());
+        Some(info)
+    }
+
     /// Instance kind for a pid: its own flags, else those of ancestors inside the same `.app`
     /// bundle (a helper's main browser process). Appended to the process name as " [kind]" so a
     /// headless or automated browser is a different app from the one the person uses.

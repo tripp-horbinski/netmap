@@ -268,6 +268,7 @@ pub fn run(db_path: &Path, data_dir: &Path, opts: Options) -> Result<()> {
         owners: HashMap::new(),
         apps: apps::Resolver::default(),
         apps_known: HashSet::new(),
+        apps_seen_at: HashMap::new(),
         db_path: db_path.to_path_buf(),
         chown_ticks: if tagger::is_root() { 3 } else { 0 },
     };
@@ -334,8 +335,10 @@ struct State {
     /// (the process is certainly alive then; by the write tick a quick `curl` may be gone).
     owners: HashMap<(&'static str, u16), (Resolved, Instant)>,
     apps: apps::Resolver,
-    /// Process names already described in the `apps` table.
+    /// Process names already described in the `apps` table, and when; re-described hourly so an
+    /// app's version follows its updates.
     apps_known: HashSet<String>,
+    apps_seen_at: HashMap<String, Instant>,
     db_path: std::path::PathBuf,
     /// As root, hand the database files to the directory's owner for the first few ticks
     /// (the WAL and shm files appear on the first write), so the user's viewer can still write.
@@ -407,22 +410,27 @@ impl State {
             opens.into_iter().map(|o| { let (p, i, v) = self.attribute(&o, &owners, &pids); (o, p, i, v) }).collect()
         };
         let mut new_apps: Vec<apps::AppInfo> = attributed.iter().filter_map(|(_, _, i, _)| i.clone()).collect();
+        let tick_now = Instant::now();
         for (name, pid) in &pids {
-            if !self.apps_known.contains(name) {
-                if let Some(i) = self.apps.for_pid(*pid) {
+            let stale = self.apps_seen_at.get(name).map_or(true, |t| tick_now.duration_since(*t) > Duration::from_secs(3600));
+            if !self.apps_known.contains(name) || stale {
+                if let Some(i) = self.apps.refresh_pid(*pid) {
                     new_apps.push(i);
                 }
             }
         }
-        let State { conn, geo, known, rdns, rdns_results, status, pktap_status, names, apps_known, .. } = self;
+        let State { conn, geo, known, rdns, rdns_results, status, pktap_status, names, apps_known, apps_seen_at, .. } = self;
         let tx = conn.unchecked_transaction()?;
         for a in new_apps {
-            if apps_known.insert(a.process.clone()) {
-                tx.execute(
-                    "INSERT OR IGNORE INTO apps (process, path, bundle_id, name, version, feed_url, first_seen) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                    (&a.process, &a.path, &a.bundle_id, &a.name, &a.version, &a.feed_url, now),
-                )?;
-            }
+            apps_known.insert(a.process.clone());
+            apps_seen_at.insert(a.process.clone(), tick_now);
+            // Version, path and feed follow the app across updates; first_seen stays.
+            tx.execute(
+                "INSERT INTO apps (process, path, bundle_id, name, version, feed_url, first_seen) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                 ON CONFLICT(process) DO UPDATE SET path = excluded.path, bundle_id = excluded.bundle_id, name = excluded.name,
+                   version = excluded.version, feed_url = excluded.feed_url",
+                (&a.process, &a.path, &a.bundle_id, &a.name, &a.version, &a.feed_url, now),
+            )?;
         }
 
         // Geolocate an IP the first time we see it, and queue a reverse-DNS lookup.

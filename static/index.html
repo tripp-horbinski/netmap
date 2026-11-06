@@ -176,7 +176,7 @@ function render() {
   const tree = nm.groupByVia([...byApp].map(([name, s]) => ({ name, n: s.size, live: conns.some((c) => c.process === name && isLive(c)), via: viaOf.get(name) ?? null })));
   const names = (g) => g.children.flatMap((c) => [c.name, ...names(c)]);
   $('apps').innerHTML = tree.filter(([, depth]) => depth === 0).slice(0, 12).map(([g]) => `
-    <a class="app" href="/map#app=${encodeURIComponent(g.name)}" title="${esc(g.name)} · ${fmtN(g.n)} destination${g.n === 1 ? '' : 's'}">${nm.appIcon(g.name, { size: 32, live: g.live })}
+    <a class="app" href="/apps#${encodeURIComponent(g.name)}" title="${esc(g.name)} · ${fmtN(g.n)} destination${g.n === 1 ? '' : 's'}">${nm.appIcon(g.name, { size: 32, live: g.live })}
       <div style="min-width:0"><div class="nm">${esc(g.name)}</div><div class="sub muted">${fmtN(g.n)} destination${g.n === 1 ? '' : 's'}${g.children.length ? ' · ' + esc(names(g).slice(0, 4).join(', ')) + (names(g).length > 4 ? '…' : '') : ''}</div></div></a>`).join('')
     || '<div class="muted">Waiting for connections…</div>';
 

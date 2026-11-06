@@ -288,6 +288,19 @@ svg.spark rect.now { fill: var(--text); }
 .cols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; max-width: 900px; }
 @media (max-width: 900px) { .cols { grid-template-columns: 1fr; } }
 
+/* ---- app report cards ------------------------------------------------------------------- */
+:root { --cls-first: var(--accent); --cls-update: #6250d6; --cls-telemetry: #eda100; --cls-ads: #e34948; --cls-cdn: #898781; --cls-other: #c3c2b7; }
+.segbar { display: flex; height: 8px; gap: 2px; border-radius: 4px; overflow: hidden; }
+.segbar i { display: block; height: 100%; min-width: 2px; }
+.segbar.tall { height: 22px; border-radius: 5px; }
+.segbar.tall i { display: grid; place-items: center; color: #fff; font-size: 11px; font-weight: 600; border-radius: 4px; }
+.c-first-party { background: var(--cls-first); } .c-update { background: var(--cls-update); } .c-telemetry { background: var(--cls-telemetry); color: #0b0b0b !important; }
+.c-ads { background: var(--cls-ads); } .c-cdn { background: var(--cls-cdn); } .c-other { background: var(--cls-other); color: #0b0b0b !important; }
+.tag.cls { background: transparent; border: 1px solid var(--line-2); color: var(--dim); margin-left: 0; }
+.tag.cls i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 4px; vertical-align: 0; }
+.list li.row.app { grid-template-columns: 26px 1fr 52px; }
+.list li.row.app .segbar { margin-top: 4px; }
+
 /* ---- app icons -------------------------------------------------------------------------- */
 .app-ic { position: relative; display: inline-grid; place-items: center; width: var(--s, 20px); height: var(--s, 20px);
           border-radius: 22%; background: var(--c, var(--line-2)); color: #fff; flex: none; vertical-align: middle; overflow: hidden; }
