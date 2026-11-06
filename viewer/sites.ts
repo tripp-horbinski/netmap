@@ -162,6 +162,60 @@ function toLoad(app: string, opens: Open[]): Load | null {
   return { app, site, root: root.name, strong, start: root.ts, end: opens[opens.length - 1]!.ts, hits };
 }
 
+export interface SiteGraph {
+  sites: { site: string; label: string; loads: number; third_party: number }[];
+  orgs: { org: string; sites: number; hosts: number; tracker: boolean }[];
+  /** Third-party hosts of `site` served by `org`, with the hosts' names for the tooltip and table. */
+  edges: { site: string; org: string; hosts: number; names: string[] }[];
+}
+
+/** Which companies serve third-party hosts to which sites: the top `maxSites` sites by third-party
+ *  footprint and the top `maxOrgs` companies by how many of those sites they appear on. Companies
+ *  past the cap fold into "Other". */
+export function buildGraph(loads: Load[], known: ReadonlySet<string>, maxSites = 12, maxOrgs = 14): SiteGraph {
+  const bySite = new Map<string, Load[]>();
+  for (const l of loads) (bySite.get(l.site) ?? bySite.set(l.site, []).get(l.site)!).push(l);
+  const summaries = [...bySite].map(([site, ls]) => summarize(site, ls, known.has(site)))
+    .filter((s) => s.third_party > 0)
+    .sort((a, b) => b.third_party - a.third_party || b.loads - a.loads || a.site.localeCompare(b.site))
+    .slice(0, maxSites);
+  const edgeMap = new Map<string, { site: string; org: string; names: Set<string>; tracker: boolean }>();
+  for (const s of summaries) {
+    for (const l of bySite.get(s.site)!) for (const h of l.hits) {
+      if (h.domain === s.site) continue;
+      const org = h.org ?? "Unknown network";
+      const k = `${s.site}\u0000${org}`;
+      const e = edgeMap.get(k) ?? edgeMap.set(k, { site: s.site, org, names: new Set(), tracker: false }).get(k)!;
+      e.names.add(h.name); e.tracker ||= h.tracker;
+    }
+  }
+  const orgStat = new Map<string, { org: string; sites: number; hosts: number; tracker: boolean }>();
+  for (const e of edgeMap.values()) {
+    const o = orgStat.get(e.org) ?? orgStat.set(e.org, { org: e.org, sites: 0, hosts: 0, tracker: false }).get(e.org)!;
+    o.sites += 1; o.hosts += e.names.size; o.tracker ||= e.tracker;
+  }
+  const ranked = [...orgStat.values()].sort((a, b) => b.sites - a.sites || b.hosts - a.hosts || a.org.localeCompare(b.org));
+  const keep = new Set(ranked.slice(0, maxOrgs).map((o) => o.org));
+  const folded = new Map<string, { site: string; org: string; hosts: number; names: string[] }>();
+  for (const e of edgeMap.values()) {
+    const org = keep.has(e.org) ? e.org : "Other";
+    const k = `${e.site}\u0000${org}`;
+    const f = folded.get(k) ?? folded.set(k, { site: e.site, org, hosts: 0, names: [] }).get(k)!;
+    f.hosts += e.names.size; f.names.push(...e.names);
+  }
+  const orgs = ranked.filter((o) => keep.has(o.org));
+  if (ranked.length > orgs.length) {
+    const rest = ranked.filter((o) => !keep.has(o.org));
+    const sites = new Set([...folded.values()].filter((e) => e.org === "Other").map((e) => e.site)).size;
+    orgs.push({ org: "Other", sites, hosts: rest.reduce((n, o) => n + o.hosts, 0), tracker: rest.some((o) => o.tracker) });
+  }
+  return {
+    sites: summaries.map((s) => ({ site: s.site, label: s.label, loads: s.loads, third_party: s.third_party })),
+    orgs,
+    edges: [...folded.values()].map((e) => ({ ...e, names: e.names.sort() })).sort((a, b) => b.hosts - a.hosts),
+  };
+}
+
 function median(xs: number[]): number {
   const s = [...xs].sort((a, b) => a - b);
   return s.length ? s[Math.floor(s.length / 2)]! : 0;
@@ -238,6 +292,10 @@ export class SitesDb {
     const known = new Set(this.known());
     return [...bySite].map(([site, loads]) => summarize(site, loads, known.has(site)))
       .sort((a, b) => b.third_party - a.third_party || b.loads - a.loads || a.site.localeCompare(b.site));
+  }
+
+  graph(window: string, browsersOnly = false): SiteGraph {
+    return buildGraph(this.loads(window, browsersOnly), new Set(this.known()));
   }
 
   site(site: string, window: string, browsersOnly = false): SiteDetail | null {

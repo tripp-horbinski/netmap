@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { sessionize, isPlumbing, isNeverRoot, isBrowser, type Open } from "./sites";
+import { sessionize, buildGraph, isPlumbing, isNeverRoot, isBrowser, type Open } from "./sites";
 
 const T0 = 1_700_000_000;
 let id = 0;
@@ -101,5 +101,26 @@ describe("sessionize", () => {
     expect(isPlumbing("fonts.googleapis.com")).toBe(false);
     expect(isPlumbing("www.google.com")).toBe(false);
     expect(isPlumbing("anonymous-communication.ghostery.net")).toBe(true);
+  });
+});
+
+describe("buildGraph", () => {
+  test("links sites to the companies behind their third-party hosts, folding the long tail", () => {
+    const loads = sessionize([
+      open(0, "www.nytimes.com", "Google Chrome Helper", "NYT"),
+      open(0.2, "cdn.optimizely.com", "Google Chrome Helper", "Optimizely"),
+      open(0.3, "stats.g.doubleclick.net", "Google Chrome Helper", "Google LLC"),
+      open(30, "www.example.com", "Google Chrome Helper", "Example"),
+      open(30.2, "fonts.gstatic.com", "Google Chrome Helper", "Google LLC"),
+      open(30.4, "cdn.jsdelivr.net", "Google Chrome Helper", "Cloudflare"),
+      open(60, "tripp.horbin.ski", "Google Chrome Helper", "GitHub"),   // pinned: root host is its name
+      open(60.2, "fonts.gstatic.com", "Google Chrome Helper", "Google LLC"),
+    ], new Set(["horbin.ski"]));
+    const g = buildGraph(loads, new Set(["horbin.ski"]), 12, 2);
+    expect(g.sites.map((s) => s.label)).toEqual(["example.com", "nytimes.com", "tripp.horbin.ski"]); // ties by third-party count sort by name
+    expect(g.orgs.map((o) => o.org)).toEqual(["Google LLC", "Cloudflare", "Other"]);
+    expect(g.orgs[0]).toMatchObject({ sites: 3, hosts: 3, tracker: true });
+    expect(g.edges.find((e) => e.site === "nytimes.com" && e.org === "Other")).toMatchObject({ hosts: 1, names: ["cdn.optimizely.com"] });
+    expect(g.edges.filter((e) => e.org === "Google LLC")).toHaveLength(3);
   });
 });

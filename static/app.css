@@ -227,3 +227,29 @@ svg.spark rect.now { fill: var(--text); }
 .leaflet-control-attribution { background: color-mix(in srgb, var(--panel) 80%, transparent); color: var(--dim); }
 .leaflet-tooltip { background: var(--panel); color: var(--text); border-color: var(--line); }
 .leaflet-tooltip-top:before { border-top-color: var(--line); }
+
+/* ---- heatmap: weekday x hour, one hue light -> dark ------------------------------------- */
+.heat { display: grid; grid-template-columns: 34px 1fr; gap: 4px 8px; max-width: 760px; margin-top: 6px; }
+.heat .d { color: var(--dim); font-size: 11px; line-height: 14px; text-align: right; }
+.heat .cells { display: grid; grid-template-columns: repeat(24, 1fr); gap: 2px; }
+.heat .c { height: 14px; border-radius: 3px; background: var(--accent); opacity: var(--o, .06); }
+.heat .c.z { background: var(--line); opacity: 1; }
+.heat .hours { grid-column: 2; display: grid; grid-template-columns: repeat(24, 1fr); color: var(--dim); font-size: 11px; }
+.heat .hours span:nth-child(6n+1) { visibility: visible; } .heat .hours span { visibility: hidden; }
+.heat-legend { display: flex; align-items: center; gap: 6px; color: var(--dim); font-size: 11px; margin-top: 8px; }
+.heat-legend i { width: 14px; height: 10px; border-radius: 2px; background: var(--accent); display: inline-block; }
+
+/* ---- dependency graph: sites left, companies right, ribbons between --------------------- */
+.graph { max-width: 960px; }
+.graph svg { width: 100%; height: auto; display: block; font: 12px system-ui, -apple-system, sans-serif; }
+.graph path { fill: none; stroke: var(--accent); stroke-opacity: .28; transition: stroke-opacity .15s; }
+.graph path.t { stroke: var(--warn); }
+.graph.dim path { stroke-opacity: .06; }
+.graph.dim path.hi { stroke-opacity: .7; }
+.graph text { fill: var(--text); }
+.graph text.n { fill: var(--dim); }
+.graph rect.node { fill: var(--line-2); rx: 2; }
+.graph rect.node.t { fill: var(--warn); }
+.graph g.site { cursor: pointer; }
+.graph g.site:hover text, .graph g.org:hover text { fill: var(--accent); }
+.graph-table { margin-top: 10px; }

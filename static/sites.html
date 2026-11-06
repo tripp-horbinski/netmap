@@ -48,7 +48,7 @@
 const { esc, fmtN, ago, ms, rows } = nm;
 const when = (ts) => nm.when(ts, true);
 const $ = (id) => document.getElementById(id);
-const state = { win: '24h', site: null, list: [], detail: null, q: '' };
+const state = { win: '24h', site: null, list: [], detail: null, q: '', graph: null, table: false };
 nm.nav('/sites');
 nm.stream();
 
@@ -82,12 +82,62 @@ function waterfall(load) {
       </div>`).join('')}</div>`;
 }
 
+// Sites left, companies right, one ribbon per (site, company) pair, width = third-party hosts.
+function renderGraph() {
+  const g = state.graph;
+  if (!g) { $('main').innerHTML = '<div class="empty">Loading…</div>'; return; }
+  if (!g.sites.length) { $('main').innerHTML = '<div class="empty">No site loads with third-party hosts in this window.</div>'; return; }
+  const ROW = 26, W = 960, LX = 230, RX = 730, PAD = 14;
+  const H = Math.max(g.sites.length, g.orgs.length) * ROW + PAD * 2;
+  const ys = (list) => { const off = (H - list.length * ROW) / 2 + PAD; return new Map(list.map((x, i) => [x.site ?? x.org, off + i * ROW])); };
+  const sy = ys(g.sites), oy = ys(g.orgs);
+  const maxE = Math.max(1, ...g.edges.map((e) => e.hosts));
+  const tracker = new Set(g.orgs.filter((o) => o.tracker).map((o) => o.org));
+  const ribbons = g.edges.map((e) => {
+    const y1 = sy.get(e.site), y2 = oy.get(e.org), w = 1.5 + 9 * Math.sqrt(e.hosts / maxE), mx = (LX + RX) / 2;
+    return `<path class="${tracker.has(e.org) ? 't' : ''}" data-site="${esc(e.site)}" data-org="${esc(e.org)}" stroke-width="${w.toFixed(1)}" d="M${LX + 8},${y1} C${mx},${y1} ${mx},${y2} ${RX - 8},${y2}"><title>${esc(e.site)} → ${esc(e.org)} · ${fmtN(e.hosts)} host${e.hosts === 1 ? '' : 's'}: ${esc(e.names.slice(0, 8).join(', '))}${e.names.length > 8 ? '…' : ''}</title></path>`;
+  }).join('');
+  const sites = g.sites.map((s) => `<g class="site" data-site="${esc(s.site)}"><rect class="node" x="${LX + 2}" y="${sy.get(s.site) - 7}" width="6" height="14"/><text x="${LX - 6}" y="${sy.get(s.site) + 4}" text-anchor="end">${esc(s.label)}</text><text class="n" x="4" y="${sy.get(s.site) + 4}">${fmtN(s.third_party)}</text></g>`).join('');
+  const orgs = g.orgs.map((o) => `<g class="org" data-org="${esc(o.org)}"><rect class="node${o.tracker ? ' t' : ''}" x="${RX - 8}" y="${oy.get(o.org) - 7}" width="6" height="14"/><text x="${RX + 6}" y="${oy.get(o.org) + 4}">${esc(o.org)}</text><text class="n" x="${W - 4}" y="${oy.get(o.org) + 4}" text-anchor="end">${fmtN(o.sites)}</text></g>`).join('');
+  $('main').innerHTML = `
+    <div class="head"><h3>Who sees your browsing</h3><span class="muted">third-party companies behind the ${fmtN(g.sites.length)} sites with the biggest footprint</span>
+      <button class="btn small" id="graph-table" style="margin-left:auto">${state.table ? 'Graph' : 'Table'}</button></div>
+    <div class="legend"><span><i style="background:var(--accent)"></i>third party</span><span><i style="background:var(--warn)"></i>includes a tracker</span><span class="muted">· ribbon width = hosts · left number = third-party hosts, right = sites · hover a ribbon, click a site</span></div>
+    ${state.table ? `<div class="graph-table">${rows(g.edges, [
+      { h: 'site', f: (e) => esc(g.sites.find((s) => s.site === e.site)?.label ?? e.site) },
+      { h: 'company', f: (e) => esc(e.org) + (tracker.has(e.org) ? '<span class="tag">tracker</span>' : '') },
+      { h: 'hosts', n: true, f: (e) => fmtN(e.hosts) },
+      { h: 'names', f: (e) => esc(e.names.join(', ')) },
+    ], 'Nothing.')}</div>`
+    : `<div class="graph" id="graph"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="sites and the companies serving their third-party hosts">${ribbons}${sites}${orgs}</svg></div>`}
+    <p class="note">Each site on the left pulled in hosts run by the companies on the right during its loads in this window.
+      First-party hosts are left out.${g.orgs.some((o) => o.org === 'Other') ? ` Companies past the top ${fmtN(g.orgs.length - 1)} fold into Other.` : ''}
+      Pick a site from the list for its full trace.</p>`;
+  $('graph-table').onclick = () => { state.table = !state.table; renderGraph(); };
+  const svg = $('graph')?.querySelector('svg');
+  if (!svg) return;
+  const hi = (key, val) => {
+    svg.parentElement.classList.toggle('dim', !!val);
+    for (const p of svg.querySelectorAll('path')) p.classList.toggle('hi', !!val && p.dataset[key] === val);
+  };
+  for (const gEl of svg.querySelectorAll('g.site, g.org')) {
+    const key = gEl.dataset.site ? 'site' : 'org';
+    gEl.onmouseenter = () => hi(key, gEl.dataset[key]);
+    gEl.onmouseleave = () => hi(key, null);
+    if (key === 'site') gEl.onclick = () => select(gEl.dataset.site);
+  }
+  for (const p of svg.querySelectorAll('path')) {
+    p.onmouseenter = () => { svg.parentElement.classList.add('dim'); p.classList.add('hi'); };
+    p.onmouseleave = () => { svg.parentElement.classList.remove('dim'); p.classList.remove('hi'); };
+  }
+}
+
 function renderDetail() {
   const d = state.detail;
-  if (!d) { $('main').innerHTML = '<div class="empty">Pick a site.</div>'; return; }
+  if (!d) { renderGraph(); return; }
   const s = d.summary;
   $('main').innerHTML = `
-    <div class="head"><h3>${esc(s.label)}${s.label !== s.site ? ` <span class="muted">${esc(s.site)}</span>` : ''}</h3>${d.pinned ? '<span class="tag fp">pinned</span>' : ''}
+    <div class="head"><button class="btn small" id="back" title="Back to the dependency graph">← all sites</button><h3>${esc(s.label)}${s.label !== s.site ? ` <span class="muted">${esc(s.site)}</span>` : ''}</h3>${d.pinned ? '<span class="tag fp">pinned</span>' : ''}
       <button class="btn small" id="pin-site" title="${d.pinned ? 'Stop treating this as a site you visit' : 'Always treat this as a site you visit, even mid-burst'}">${d.pinned ? 'Unpin' : 'Pin as site'}</button></div>
     <div class="muted">${fmtN(s.loads)} load${s.loads === 1 ? '' : 's'} from ${s.apps.map(esc).join(', ')} · last ${ago(s.last)}</div>
     <div class="tiles">
@@ -127,6 +177,7 @@ function renderDetail() {
     await fetch('/api/sites/known', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, pinned }) });
     await refresh();
   };
+  $('back').onclick = () => { state.site = null; history.replaceState(null, '', ' '); refresh(); };
   $('pin-site').onclick = () => pin(s.site, !d.pinned);
   for (const b of $('main').querySelectorAll('button.pin')) b.onclick = () => pin(b.dataset.name, true);
 }
@@ -139,11 +190,12 @@ async function select(site) {
 
 async function refresh() {
   const q = `since=${encodeURIComponent(state.win)}`;
-  const [list, detail] = await Promise.all([
+  const [list, detail, graph] = await Promise.all([
     fetch(`/api/sites?${q}`).then((r) => r.json()),
     state.site ? fetch(`/api/sites/${encodeURIComponent(state.site)}?${q}`).then((r) => (r.ok ? r.json() : null)) : null,
+    state.site ? state.graph : fetch(`/api/sites/graph?${q}`).then((r) => r.json()),
   ]);
-  state.list = list; state.detail = detail;
+  state.list = list; state.detail = detail; state.graph = graph;
   renderList(); renderDetail();
 }
 

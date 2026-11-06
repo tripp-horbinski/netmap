@@ -166,6 +166,7 @@ const server = Bun.serve({
         }
       },
     },
+    "/api/sites/graph": { GET: (req) => withWindow((w) => sites.graph(w, browsersOnly(req)))(req) },
     "/api/sites/known": {
       GET: () => json(sites.known()),
       POST: async (req) => {

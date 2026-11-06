@@ -60,7 +60,8 @@ Python; run `bun run build` first and rerun the script after rebuilding.
 The Bun viewer also serves a LAN device dashboard at `/devices` (linked from the map): every device
 the resolver has heard from, with lookups over time, domains, tracker lookups, and names it had
 never asked for before the chosen window. Click a row to name a device; it's the same `label` that
-`netlog name` sets. Behind it: `GET /api/devices?since=24h`, `GET /api/devices/IP?since=24h` and
+`netlog name` sets. The detail view includes a weekday-by-hour heatmap of lookups (local time) so a
+device that phones home at 3 a.m. stands out (`heat` in the device JSON). Behind it: `GET /api/devices?since=24h`, `GET /api/devices/IP?since=24h` and
 `POST /api/devices/IP/name {"label": "..."}`. The tracker list and `base_domain()` are mirrored
 from `netlog/src/trackers.rs` and `db.rs` in `viewer/trackers.ts`; change both together.
 
@@ -75,6 +76,11 @@ never-a-root domains live in `viewer/sites.ts`. API: `GET /api/sites?since=24h`,
 visit never reappear, and a second site opened inside the gap without a `www.` host merges into the first.
 Pin a host as a site from the page (or `POST /api/sites/known {"name": "tripp.horbin.ski"}`) when the
 heuristics get it wrong; pinned sites live in netlog's `meta` table and always split out their own loads.
+A pinned site is named by its root host (tripp.horbin.ski); everything else by base domain.
+
+With no site selected the page shows the dependency graph: the sites with the biggest third-party
+footprint on the left, the companies serving those hosts on the right, one ribbon per pair, hover for
+the host names, a table view behind the *Table* button. `GET /api/sites/graph?since=24h`.
 
 **Route traces** on the map: the *route* button in any destination popup runs the system
 `traceroute` in ICMP mode (setuid on macOS, so no sudo; UDP probes die at AT&T) and draws the path

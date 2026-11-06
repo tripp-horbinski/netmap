@@ -26,13 +26,15 @@ export interface DeviceDetail {
   trackers: NameRow[];
   /** Names this device had never looked up before the window began. */
   new_names: NameRow[];
+  /** Lookups by local weekday and hour: 7 rows of 24, Sunday first, for the window. */
+  heat: number[][];
 }
 
 interface DeviceRec { ip: string; mac: string | null; label: string | null; first_seen: number; last_seen: number }
 interface NameAgg { client: string; qname: string; n: number; first: number; last: number }
 
 export class LanDb {
-  private devicesQ; private namesQ; private namesForQ; private firstSeenQ; private binsQ; private minTsQ; private renameQ;
+  private devicesQ; private namesQ; private namesForQ; private firstSeenQ; private binsQ; private minTsQ; private renameQ; private heatQ;
 
   constructor(private db: Database) {
     this.devicesQ = db.query<DeviceRec, []>("SELECT ip, mac, label, first_seen, last_seen FROM devices ORDER BY last_seen DESC");
@@ -48,6 +50,10 @@ export class LanDb {
       `SELECT client, CAST((ts - ?1) / ?2 AS INTEGER) AS b, COUNT(*) AS n
        FROM dns WHERE ts >= ?1 GROUP BY client, b`);
     this.minTsQ = db.query<{ t: number | null }, []>("SELECT MIN(ts) AS t FROM dns");
+    this.heatQ = db.query<{ d: number; h: number; n: number }, [number, string]>(
+      `SELECT CAST(strftime('%w', ts, 'unixepoch', 'localtime') AS INTEGER) AS d,
+              CAST(strftime('%H', ts, 'unixepoch', 'localtime') AS INTEGER) AS h, COUNT(*) AS n
+       FROM dns WHERE ts >= ?1 AND client = ?2 GROUP BY d, h`);
     this.renameQ = db.query<{ changes: number }, [string | null, string]>(
       "UPDATE devices SET label = ?1 WHERE ip = ?2 RETURNING 1 AS changes");
   }
@@ -124,8 +130,10 @@ export class LanDb {
       ? names.filter((r) => !r.qname.endsWith(".arpa") && (firstEver.get(r.qname) ?? 0) >= axis.since)
           .map(toRow).sort((a, b) => b.first - a.first)
       : [];
+    const heat = Array.from({ length: 7 }, () => new Array<number>(24).fill(0));
+    for (const { d, h, n } of this.heatQ.all(axis.since, ip)) heat[d]![h] = n;
     return {
-      device, window: axis,
+      device, window: axis, heat,
       domains: [...domains.values()].sort((a, b) => b.lookups - a.lookups || a.domain.localeCompare(b.domain)),
       trackers, new_names,
     };
