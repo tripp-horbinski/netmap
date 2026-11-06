@@ -17,7 +17,7 @@ export interface OpenEvent {
 }
 
 export class NetmapDb {
-  private db: Database;
+  readonly db: Database;
   private connQ; private namesQ; private maxEventQ; private eventsQ; private metaQ; private resetQ;
 
   constructor(path: string) {

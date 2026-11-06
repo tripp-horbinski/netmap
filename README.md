@@ -50,6 +50,13 @@ bun run build                                # single binary: viewer/dist/netmap
 `VIEWER=bun ./install-agents.sh` points the launchd viewer agent at the compiled binary instead of
 Python; run `bun run build` first and rerun the script after rebuilding.
 
+The Bun viewer also serves a LAN device dashboard at `/devices` (linked from the map): every device
+the resolver has heard from, with lookups over time, domains, tracker lookups, and names it had
+never asked for before the chosen window. Click a row to name a device; it's the same `label` that
+`netlog name` sets. Behind it: `GET /api/devices?since=24h`, `GET /api/devices/IP?since=24h` and
+`POST /api/devices/IP/name {"label": "..."}`. The tracker list and `base_domain()` are mirrored
+from `netlog/src/trackers.rs` and `db.rs` in `viewer/trackers.ts`; change both together.
+
 ## Run it as a service
 
 ```sh

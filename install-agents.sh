@@ -14,7 +14,14 @@ LOGS="$HOME/Library/Logs/netmap"
 DOMAIN="gui/$(id -u)"
 NAMES="com.tripp.netlog.record com.tripp.netlog.resolve com.tripp.netmap.viewer"
 
-stop_agent() { launchctl bootout "$DOMAIN/$1" 2>/dev/null || true; }
+# bootout returns before the service is gone; bootstrapping too soon fails with "5: Input/output error".
+stop_agent() {
+  launchctl bootout "$DOMAIN/$1" 2>/dev/null || true
+  for _ in $(seq 1 50); do
+    launchctl print "$DOMAIN/$1" >/dev/null 2>&1 || return 0
+    sleep 0.1
+  done
+}
 
 if [[ "${1:-}" == "uninstall" ]]; then
   for name in $NAMES; do

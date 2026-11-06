@@ -11,6 +11,7 @@ import { join, normalize, resolve } from "node:path";
 import { $ } from "bun";
 import { Geo } from "./geo";
 import { NetmapDb } from "./db";
+import { LanDb } from "./lan";
 
 const COMPILED = import.meta.dir.startsWith("/$bunfs");
 const INTERVAL = 2.0; // seconds between netlog's lsof polls; the page uses it for the "live" window
@@ -58,10 +59,11 @@ async function findHome(override: string | undefined): Promise<Home | null> {
 }
 
 const db = new NetmapDb(DB_PATH);
+const lan = new LanDb(db.db);
 const home = await findHome(args.home);
 
-function json(body: unknown): Response {
-  return Response.json(body, { headers: { "Cache-Control": "no-store" } });
+function json(body: unknown, status = 200): Response {
+  return Response.json(body, { status, headers: { "Cache-Control": "no-store" } });
 }
 
 function snapshot() {
@@ -109,6 +111,20 @@ function stream(): Response {
   });
 }
 
+function windowOf(req: Request): string {
+  return new URL(req.url).searchParams.get("since") ?? "24h";
+}
+
+function withWindow(fn: (window: string) => unknown): (req: Request) => Response {
+  return (req) => {
+    try {
+      return json(fn(windowOf(req)));
+    } catch (e) {
+      return json({ error: String(e instanceof Error ? e.message : e) }, 400);
+    }
+  };
+}
+
 async function staticFile(pathname: string): Promise<Response> {
   const rel = normalize(decodeURIComponent(pathname === "/" ? "/index.html" : pathname));
   const path = join(STATIC, rel);
@@ -125,6 +141,27 @@ const server = Bun.serve({
     "/api/data": { GET: () => json(snapshot()) },
     "/api/stream": { GET: () => stream() },
     "/api/reset": { POST: () => { db.reset(); return json({ ok: true }); } },
+    "/devices": { GET: () => staticFile("/devices.html") },
+    "/api/devices": { GET: withWindow((w) => lan.devices(w)) },
+    "/api/devices/:ip": {
+      GET: (req) => {
+        try {
+          const detail = lan.device(decodeURIComponent(req.params.ip), windowOf(req));
+          return detail ? json(detail) : json({ error: "no such device" }, 404);
+        } catch (e) {
+          return json({ error: String(e instanceof Error ? e.message : e) }, 400);
+        }
+      },
+    },
+    "/api/devices/:ip/name": {
+      POST: async (req) => {
+        const body = (await req.json().catch(() => null)) as { label?: unknown } | null;
+        if (!body || typeof body.label !== "string") return json({ error: "expected {label: string}" }, 400);
+        return lan.rename(decodeURIComponent(req.params.ip), body.label)
+          ? json({ ok: true })
+          : json({ error: "no such device" }, 404);
+      },
+    },
   },
   fetch(req) {
     return staticFile(new URL(req.url).pathname);
