@@ -89,6 +89,7 @@ function snapshot() {
     home,
     sniffer: sniffer ? `${sniffer} (netlog record)` : "off",
     connections: db.connections(),
+    via: db.viaByProcess(),
   };
 }
 

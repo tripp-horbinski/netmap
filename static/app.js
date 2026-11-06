@@ -48,13 +48,28 @@ window.nm = (() => {
   const appInfo = (p) => apps.get(p) ?? null;
   function appName(p) {
     if (!p) return p;
+    for (const [re, name] of APP_ALIAS) if (re.test(p)) return name; // one name per product, whatever the helper
     const a = apps.get(p);
+    if (a?.path?.includes('/share/claude/versions/')) return 'Claude Code'; // its binary is named by version
     if (a?.name) return a.name;
-    for (const [re, name] of APP_ALIAS) if (re.test(p)) return name;
     return p.replace(/ Helper( \(.*\))?$/, '').replace(/ \((Renderer|GPU|Plugin|Networking|Alerts|Utility)\)$/, '');
   }
   /** Rewrite process names on a /api/data snapshot in place; the raw name is kept as `raw`. */
-  function aliasConnections(d) { for (const c of d.connections) { c.raw = c.process; c.process = appName(c.process); } return d; }
+  function aliasConnections(d) {
+    for (const c of d.connections) { c.raw = c.process; c.via = d.via?.[c.process] ?? null; c.process = appName(c.process); }
+    return d;
+  }
+  /** Group per-process counts under the app each was launched from: [{ name, n, live, children: [...] }]. */
+  function groupByVia(items) {
+    const top = new Map();
+    const get = (name) => top.get(name) ?? top.set(name, { name, n: 0, own: 0, live: false, children: [] }).get(name);
+    for (const it of items) {
+      if (it.via && it.via !== it.name) { const g = get(it.via); g.children.push(it); g.n += it.n; g.live ||= it.live; }
+      else { const g = get(it.name); g.own = it.n; g.n += it.n; g.live ||= it.live; }
+    }
+    for (const g of top.values()) g.children.sort((a, b) => b.n - a.n);
+    return [...top.values()].sort((a, b) => b.n - a.n);
+  }
 
   // Stable per-app hue; lightness suits the surface so dots read on both themes.
   function color(name) {
@@ -196,5 +211,5 @@ window.nm = (() => {
   }
   const WINDOW_SECONDS = { '1h': 3600, '24h': 86400, '7d': 604800, all: Infinity };
 
-  return { esc, fmtN, compact, ago, when, ms, nav, stream, live, perMinute, spark, binTimes, rows, bars, segment, color, token, isDark, WINDOW_SECONDS, countryKey, mix, choroFill, stackedSpark, delta, appName, appInfo, aliasConnections };
+  return { esc, fmtN, compact, ago, when, ms, nav, stream, live, perMinute, spark, binTimes, rows, bars, segment, color, token, isDark, WINDOW_SECONDS, countryKey, mix, choroFill, stackedSpark, delta, appName, appInfo, aliasConnections, groupByVia };
 })();

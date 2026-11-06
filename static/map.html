@@ -180,7 +180,7 @@ function render() {
   const win = state.win === 'live' ? liveSec : state.win === 'all' ? Infinity : +state.win;
   const isLive = c => d.now - c.last_seen <= liveSec;
   const inWin = d.connections.filter(c => d.now - c.last_seen <= win);
-  const conns = state.proc ? inWin.filter(c => c.process === state.proc) : inWin;
+  const conns = state.proc ? inWin.filter(c => c.process === state.proc || c.via === state.proc) : inWin;
 
   // Stats
   const ips = new Set(conns.map(c => c.ip));
@@ -247,14 +247,18 @@ function renderSidebar(inWin, conns, unknown, isLive, now) {
   const procs = new Map();
   for (const c of inWin) {
     let p = procs.get(c.process);
-    if (!p) procs.set(c.process, p = { ips: new Set(), live: false });
+    if (!p) procs.set(c.process, p = { ips: new Set(), live: false, via: c.via });
     p.ips.add(c.ip); p.live ||= isLive(c);
   }
   document.getElementById('proc-hint').textContent = state.proc ? '· click again to show all' : '· click to filter';
-  document.getElementById('procs').innerHTML = [...procs].sort((a, b) => b[1].ips.size - a[1].ips.size).map(([name, p]) =>
-    `<li class="row ${state.proc === name ? 'sel' : ''}" data-proc="${esc(name)}">
-       <span class="dot ${p.live ? 'live' : ''}" style="background:${color(name)}"></span>
-       <span class="name">${esc(name)}</span><span class="n">${p.ips.size}</span></li>`).join('') || '<li class="muted">Waiting for connections…</li>';
+  // CLI tools sit under the app that launched them (via); the parent row filters to the whole group.
+  const row = (name, n, live, sub = false) =>
+    `<li class="row ${sub ? 'sub' : ''} ${state.proc === name ? 'sel' : ''}" data-proc="${esc(name)}">
+       <span class="dot ${live ? 'live' : ''}" style="background:${color(name)}"></span>
+       <span class="name">${esc(name)}</span><span class="n">${n}</span></li>`;
+  const groups = nm.groupByVia([...procs].map(([name, p]) => ({ name, n: p.ips.size, live: p.live, via: p.via })));
+  document.getElementById('procs').innerHTML = groups.map((g) =>
+    row(g.name, g.n, g.live) + g.children.map((c) => row(c.name, c.n, c.live, true)).join('')).join('') || '<li class="muted">Waiting for connections…</li>';
 
   // Orgs
   const orgs = new Map();
@@ -312,7 +316,7 @@ function renderLive() {
 }
 function flash(e) {
   const home = state.data?.home;
-  if (e.lat == null || flashing > 25 || (state.proc && e.app !== state.proc)) return;
+  if (e.lat == null || flashing > 25 || (state.proc && e.app !== state.proc && e.via !== state.proc)) return;
   flashing++;
   const col = color(e.app);
   let arc = null;

@@ -182,14 +182,19 @@ function render() {
   if (d.home && !homeMarker) homeMarker = L.circleMarker([d.home.lat, d.home.lon], { radius: 5, color: token('--panel'), fillColor: token('--accent'), fillOpacity: 1, weight: 2, interactive: false }).addTo(map);
 
   // apps, orgs, newest
-  const byApp = new Map(), byOrg = new Map();
+  const byApp = new Map(), byOrg = new Map(), viaOf = new Map();
   for (const c of conns) {
     (byApp.get(c.process) ?? byApp.set(c.process, new Set()).get(c.process)).add(c.ip);
+    if (c.via) viaOf.set(c.process, c.via);
     const o = c.org || 'Unknown network';
     (byOrg.get(o) ?? byOrg.set(o, new Set()).get(o)).add(c.ip);
   }
   const top = (m, n) => [...m].map(([name, s]) => ({ name, n: s.size })).sort((a, b) => b.n - a.n).slice(0, n);
-  $('apps').innerHTML = bars(top(byApp, 10), 'Waiting for connections…');
+  // Apps grouped under the app that launched them (via): parent rows carry the group total.
+  const appGroups = nm.groupByVia([...byApp].map(([name, s]) => ({ name, n: s.size, via: viaOf.get(name) ?? null })));
+  const maxApp = Math.max(1, ...appGroups.map((g) => g.n));
+  const bar = (name, n, sub) => `<li class="${sub ? 'sub' : ''}" style="--w:${(100 * n / maxApp).toFixed(1)}%"><span class="name">${esc(name)}</span><span class="n">${fmtN(n)}</span></li>`;
+  $('apps').innerHTML = appGroups.slice(0, 10).map((g) => bar(g.name, g.n, false) + g.children.slice(0, 6).map((c) => bar(c.name, c.n, true)).join('')).join('') || '<li class="muted">Waiting for connections…</li>';
   $('orgs').innerHTML = bars(top(byOrg, 10), 'Waiting for connections…');
   const seen = new Map();
   for (const c of conns) if (!seen.has(c.ip) || c.first_seen < seen.get(c.ip).first_seen) seen.set(c.ip, c);
