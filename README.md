@@ -83,6 +83,27 @@ With no site selected the page shows the dependency graph: the sites with the bi
 footprint on the left, the companies serving those hosts on the right, one ribbon per pair, hover for
 the host names, a table view behind the *Table* button. `GET /api/sites/graph?since=24h`.
 
+## Naming every connection's process (pktap, root)
+
+`lsof` polling only sees connections that live longer than the poll and only processes running
+as you, so one-shot update checks and Apple's daemons show as "(unknown)". macOS's `tcpdump`
+can capture on the `pktap` pseudo-interface, where every packet carries its owning process, and
+netlog uses that when it runs as root: the SYN or QUIC Initial names the connection on its first
+packet, with the app a system proxy (`nsurlsessiond`) acted for when the kernel knows it.
+
+```sh
+sudo ./install-agents.sh        # recorder as a root LaunchDaemon; resolver and viewer stay yours
+netlog/target/release/netlog status   # "pktap: on" once it is naming connections
+```
+
+The recorder hands the database files back to your user after each write, so the viewer keeps
+working. `--no-pktap` turns it off. Without sudo everything works as before.
+
+Either way, netlog now resolves each process to its app: executable path from the pid, then the
+outermost `.app` bundle's Info.plist (name, bundle id, version, Sparkle update feed), stored in an
+`apps` table and served at `GET /api/apps`. The pages show "Google Chrome" for every Chrome helper
+and `releases.zentty.org` can be read back to Zentty's update check from its feed URL.
+
 ## Exact browser attribution (Chrome extension)
 
 Chrome sends every tab's traffic through one Network Service process, so from outside the browser

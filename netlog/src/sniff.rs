@@ -39,6 +39,8 @@ pub struct Open {
 pub enum Event {
     Name(Name),
     Open(Open),
+    /// From pktap (tagger.rs): which process owns a local port.
+    Owner(crate::tagger::Owner),
 }
 
 pub fn default_interface() -> String {

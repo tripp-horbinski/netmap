@@ -162,6 +162,7 @@ const server = Bun.serve({
   idleTimeout: 0, // event streams stay open indefinitely
   routes: {
     "/api/data": { GET: () => json(snapshot()) },
+    "/api/apps": { GET: () => json(db.apps()) },
     "/api/stream": { GET: () => stream() },
     "/api/reset": { POST: () => { db.reset(); return json({ ok: true }); } },
     "/map": { GET: () => staticFile("/map.html") },

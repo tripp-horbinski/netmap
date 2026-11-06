@@ -1,9 +1,11 @@
 mod analytics;
+mod apps;
 mod db;
 mod output;
 mod record;
 mod resolve;
 mod sniff;
+mod tagger;
 mod trackers;
 
 use anyhow::Result;
@@ -29,7 +31,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Record connections (lsof) and hostnames (DNS + TLS SNI) until stopped
+    /// Record connections (lsof, or pktap when root) and hostnames (DNS + TLS SNI) until stopped
     Record {
         /// Seconds between lsof polls
         #[arg(long, default_value_t = 2.0)]
@@ -37,6 +39,9 @@ enum Cmd {
         /// Skip packet capture (no hostnames, no BPF access needed)
         #[arg(long)]
         no_sniff: bool,
+        /// Don't use pktap for process names even when running as root
+        #[arg(long)]
+        no_pktap: bool,
         /// Directory holding the DB-IP .mmdb files
         #[arg(long)]
         data_dir: Option<PathBuf>,
@@ -108,8 +113,8 @@ fn main() -> Result<()> {
     let fmt = cli.format;
 
     match cli.cmd {
-        Cmd::Record { interval, no_sniff, data_dir: dir } => {
-            record::run(&db_path, &dir.unwrap_or(data_dir), record::Options { interval, sniff: !no_sniff })?
+        Cmd::Record { interval, no_sniff, no_pktap, data_dir: dir } => {
+            record::run(&db_path, &dir.unwrap_or(data_dir), record::Options { interval, sniff: !no_sniff, pktap: !no_pktap })?
         }
         Cmd::Guide => print!("{}", analytics::GUIDE),
         Cmd::Schema => analytics::schema(fmt),

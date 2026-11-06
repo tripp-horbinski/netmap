@@ -14,6 +14,8 @@ use std::time::{Duration, Instant};
 
 use crate::db;
 use crate::sniff::{self, Event, Name, Open};
+use crate::tagger::{self, Owner};
+use crate::apps;
 
 /// How long to wait after a connection opens before asking lsof which app owns it. lsof
 /// takes ~35ms and a quick HTTPS request lives ~90ms, so this has to be short.
@@ -24,6 +26,8 @@ const MIN_LSOF_GAP: Duration = Duration::from_millis(60);
 pub struct Options {
     pub interval: f64,
     pub sniff: bool,
+    /// Name processes from pktap (needs root); falls back to lsof when it can't run.
+    pub pktap: bool,
 }
 
 /// One live socket from lsof.
@@ -71,12 +75,15 @@ fn parse_endpoint(s: &str) -> Option<(IpAddr, u16)> {
 /// Live outbound sockets, plus (proto, local port) -> process for attributing new opens.
 type PortOwners = HashMap<(String, u16), String>;
 
-fn poll_lsof() -> Result<(HashSet<Conn>, PortOwners)> {
+/// Live sockets, port owners, and the pid behind each process name (for bundle resolution).
+fn poll_lsof() -> Result<(HashSet<Conn>, PortOwners, HashMap<String, i32>)> {
     let out = Command::new("lsof").args(["-nP", "+c", "0", "-i", "-F", "pcPnT"]).output()?;
     let text = String::from_utf8_lossy(&out.stdout);
     let mut conns = HashSet::new();
     let mut owners = PortOwners::new();
     let mut cmd = String::new();
+    let mut pid: i32 = 0;
+    let mut pids = HashMap::new();
     // Current file record: (proto, name, tcp state)
     let mut cur: Option<(String, String, String)> = None;
 
@@ -106,8 +113,8 @@ fn poll_lsof() -> Result<(HashSet<Conn>, PortOwners)> {
             None => continue,
         };
         match tag {
-            'p' => emit(cur.take(), &cmd),
-            'c' => cmd = val.to_string(),
+            'p' => { emit(cur.take(), &cmd); pid = val.parse().unwrap_or(0); }
+            'c' => { cmd = val.to_string(); if pid > 0 { pids.entry(cmd.clone()).or_insert(pid); } }
             'f' => {
                 emit(cur.take(), &cmd);
                 cur = Some(Default::default());
@@ -124,7 +131,25 @@ fn poll_lsof() -> Result<(HashSet<Conn>, PortOwners)> {
     }
     emit(cur.take(), &cmd);
     drop(emit);
-    Ok((conns, owners))
+    Ok((conns, owners, pids))
+}
+
+/// Running as root (for pktap) must not leave the database owned by root: the viewer, run by the
+/// user, writes names, pins and browser requests to it. Hand the files to the data dir's owner.
+fn give_db_to_owner(db: &Path) {
+    use std::os::unix::fs::MetadataExt;
+    let Some(dir) = db.parent() else { return };
+    let Ok(meta) = std::fs::metadata(dir) else { return };
+    let (uid, gid) = (meta.uid(), meta.gid());
+    if uid == 0 {
+        return;
+    }
+    for suffix in ["", "-wal", "-shm"] {
+        let p = db.with_file_name(format!("{}{suffix}", db.file_name().unwrap_or_default().to_string_lossy()));
+        if p.exists() {
+            let _ = std::os::unix::fs::chown(&p, Some(uid), Some(gid));
+        }
+    }
 }
 
 struct Geo {
@@ -199,11 +224,20 @@ pub fn run(db_path: &Path, data_dir: &Path, opts: Options) -> Result<()> {
     }
 
     let status = Arc::new(Mutex::new(if opts.sniff { "starting".to_string() } else { "off (--no-sniff)".to_string() }));
+    let pktap_status = Arc::new(Mutex::new(match (opts.pktap, tagger::is_root()) {
+        (false, _) => "off (--no-pktap)".to_string(),
+        (true, false) => "off (needs root: sudo ./install-agents.sh)".to_string(),
+        (true, true) => "starting".to_string(),
+    }));
     // Keep `ev_tx` alive here even without sniffing, so recv_timeout waits instead of spinning.
     let (ev_tx, ev_rx) = mpsc::channel::<Event>();
     if opts.sniff {
         let (tx, status) = (ev_tx.clone(), status.clone());
         std::thread::spawn(move || sniff::run(tx, status));
+    }
+    if opts.pktap && tagger::is_root() {
+        let (tx, status) = (ev_tx.clone(), pktap_status.clone());
+        std::thread::spawn(move || tagger::run(tx, status));
     }
     let (rdns_tx, rdns_rx) = mpsc::channel();
     let mut st = State {
@@ -213,11 +247,18 @@ pub fn run(db_path: &Path, data_dir: &Path, opts: Options) -> Result<()> {
         rdns: spawn_rdns_pool(rdns_tx),
         rdns_results: rdns_rx,
         status,
+        pktap_status,
         names: Vec::new(),
         opens: Vec::new(),
         recent: HashMap::new(),
+        owners: HashMap::new(),
+        apps: apps::Resolver::default(),
+        apps_known: HashSet::new(),
+        db_path: db_path.to_path_buf(),
+        chown_ticks: if tagger::is_root() { 3 } else { 0 },
     };
     st.known = st.conn.prepare("SELECT ip FROM ip_info")?.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+    st.apps_known = st.conn.prepare("SELECT process FROM apps")?.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
     db::set_meta(&st.conn, "recorder", "netlog")?;
     eprintln!("netlog: recording to {} (poll every {}s, opens in real time)", db_path.display(), opts.interval);
 
@@ -257,6 +298,7 @@ pub fn run(db_path: &Path, data_dir: &Path, opts: Options) -> Result<()> {
                     first_open.get_or_insert_with(Instant::now);
                 }
             }
+            Ok(Event::Owner(o)) => st.remember_owner(o),
             Err(RecvTimeoutError::Timeout | RecvTimeoutError::Disconnected) => {}
         }
     }
@@ -269,13 +311,44 @@ struct State {
     rdns: Sender<String>,
     rdns_results: Receiver<(String, String)>,
     status: Arc<Mutex<String>>,
+    pktap_status: Arc<Mutex<String>>,
     names: Vec<Name>,
     opens: Vec<Open>,
     /// (ip, local port, proto) -> when we last logged an open; QUIC repeats long headers.
     recent: HashMap<(IpAddr, u16, &'static str), Instant>,
+    /// (proto, local port) -> who opened it, from pktap; beats lsof because it never misses.
+    owners: HashMap<(&'static str, u16), (Owner, Instant)>,
+    apps: apps::Resolver,
+    /// Process names already described in the `apps` table.
+    apps_known: HashSet<String>,
+    db_path: std::path::PathBuf,
+    /// As root, hand the database files to the directory's owner for the first few ticks
+    /// (the WAL and shm files appear on the first write), so the user's viewer can still write.
+    chown_ticks: u8,
 }
 
 impl State {
+    fn remember_owner(&mut self, o: Owner) {
+        let now = Instant::now();
+        if self.owners.len() > 5000 {
+            self.owners.retain(|_, (_, t)| now.duration_since(*t) < Duration::from_secs(120));
+        }
+        self.owners.insert((o.proto, o.local_port), (o, now));
+    }
+
+    /// The process name for an open: pktap's owner (resolved through its pid to the executable
+    /// name lsof would report, preferring the app a system proxy acted for), else lsof's.
+    fn attribute(&mut self, o: &Open, lsof: &PortOwners) -> (String, Option<apps::AppInfo>) {
+        if let Some((owner, _)) = self.owners.get(&(o.proto, o.local_port)).cloned() {
+            let info = owner.epid.and_then(|e| self.apps.for_pid(e)).or_else(|| self.apps.for_pid(owner.pid));
+            return match info {
+                Some(i) => (i.process.clone(), Some(i)),
+                None => (owner.comm, None), // exited already; the truncated kernel name is still a name
+            };
+        }
+        (lsof.get(&(o.proto.to_string(), o.local_port)).cloned().unwrap_or_else(|| "(unknown)".into()), None)
+    }
+
     fn accept_open(&mut self, o: &Open) -> bool {
         if !is_public(o.ip) {
             return false;
@@ -292,9 +365,30 @@ impl State {
 
     fn tick(&mut self, full: bool) -> Result<()> {
         let now = db::now();
-        let (live, owners) = if full { poll_lsof().context("running lsof")? } else { Default::default() };
-        let State { conn, geo, known, rdns, rdns_results, status, names, opens, .. } = self;
+        let (live, owners, pids) = if full { poll_lsof().context("running lsof")? } else { Default::default() };
+        // Attribute opens first: it borrows the resolver, which the rest of the tick does not.
+        let attributed: Vec<(Open, String, Option<apps::AppInfo>)> = {
+            let opens: Vec<Open> = self.opens.drain(..).collect();
+            opens.into_iter().map(|o| { let (p, i) = self.attribute(&o, &owners); (o, p, i) }).collect()
+        };
+        let mut new_apps: Vec<apps::AppInfo> = attributed.iter().filter_map(|(_, _, i)| i.clone()).collect();
+        for (name, pid) in &pids {
+            if !self.apps_known.contains(name) {
+                if let Some(i) = self.apps.for_pid(*pid) {
+                    new_apps.push(i);
+                }
+            }
+        }
+        let State { conn, geo, known, rdns, rdns_results, status, pktap_status, names, apps_known, .. } = self;
         let tx = conn.unchecked_transaction()?;
+        for a in new_apps {
+            if apps_known.insert(a.process.clone()) {
+                tx.execute(
+                    "INSERT OR IGNORE INTO apps (process, path, bundle_id, name, version, feed_url, first_seen) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    (&a.process, &a.path, &a.bundle_id, &a.name, &a.version, &a.feed_url, now),
+                )?;
+            }
+        }
 
         // Geolocate an IP the first time we see it, and queue a reverse-DNS lookup.
         let mut ensure_ip = |tx: &Connection, ip: &str| -> Result<()> {
@@ -319,12 +413,7 @@ impl State {
             )?;
             ensure_ip(&tx, &c.ip)?;
         }
-        for o in opens.drain(..) {
-            // Connections that closed before lsof ran can't be attributed to an app.
-            let process = owners
-                .get(&(o.proto.to_string(), o.local_port))
-                .cloned()
-                .unwrap_or_else(|| "(unknown)".into());
+        for (o, process, _) in attributed {
             let ip = o.ip.to_string();
             tx.execute(
                 "INSERT INTO events (ts, process, ip, port, proto) VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -353,8 +442,13 @@ impl State {
         if full {
             db::set_meta(&tx, "heartbeat", &now.to_string())?;
             db::set_meta(&tx, "sniffer", &status.lock().unwrap())?;
+            db::set_meta(&tx, "pktap", &pktap_status.lock().unwrap())?;
         }
         tx.commit()?;
+        if self.chown_ticks > 0 {
+            self.chown_ticks -= 1;
+            give_db_to_owner(&self.db_path);
+        }
         Ok(())
     }
 }

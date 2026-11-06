@@ -39,6 +39,10 @@ CREATE TABLE IF NOT EXISTS devices (
   ip TEXT PRIMARY KEY, mac TEXT, label TEXT, first_seen REAL NOT NULL, last_seen REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS conn_last_seen ON conn (last_seen);
+CREATE TABLE IF NOT EXISTS apps (
+  process TEXT PRIMARY KEY, path TEXT, bundle_id TEXT, name TEXT, version TEXT, feed_url TEXT,
+  first_seen REAL NOT NULL
+);
 ";
 
 /// Friendly view for analysis. Recreated on every open so changes here take effect.

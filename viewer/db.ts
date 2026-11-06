@@ -16,6 +16,8 @@ export interface OpenEvent {
   lat: number | null; lon: number | null;
 }
 
+export interface AppRow { process: string; path: string | null; bundle_id: string | null; name: string | null; version: string | null; feed_url: string | null }
+
 export class NetmapDb {
   readonly db: Database;
   private connQ; private namesQ; private maxEventQ; private eventsQ; private metaQ; private resetQ;
@@ -65,6 +67,15 @@ export class NetmapDb {
       out.push(e);
     }
     return out;
+  }
+
+  /** Apps netlog resolved from process executables: bundle name, id, version, update feed. */
+  apps(): AppRow[] {
+    try {
+      return this.db.query<AppRow, []>("SELECT process, path, bundle_id, name, version, feed_url FROM apps").all();
+    } catch {
+      return []; // table arrives with the newer netlog
+    }
   }
 
   meta(key: string): string | null {

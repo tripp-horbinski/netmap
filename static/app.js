@@ -42,8 +42,14 @@ window.nm = (() => {
     [/^Brave Browser/, 'Brave'], [/^Arc( Helper.*)?$/, 'Arc'], [/^firefox/i, 'Firefox'], [/^(Safari|com\.apple\.WebKit)/, 'Safari'],
     [/^Code Helper/, 'VS Code'], [/^Electron( Helper.*)?$/, 'Electron'],
   ];
+  // Resolved by netlog from the executable's bundle (/api/apps): process name -> app.
+  const apps = new Map();
+  fetch('/api/apps').then((r) => (r.ok ? r.json() : [])).then((rows) => { for (const a of rows) apps.set(a.process, a); }).catch(() => {});
+  const appInfo = (p) => apps.get(p) ?? null;
   function appName(p) {
     if (!p) return p;
+    const a = apps.get(p);
+    if (a?.name) return a.name;
     for (const [re, name] of APP_ALIAS) if (re.test(p)) return name;
     return p.replace(/ Helper( \(.*\))?$/, '').replace(/ \((Renderer|GPU|Plugin|Networking|Alerts|Utility)\)$/, '');
   }
@@ -190,5 +196,5 @@ window.nm = (() => {
   }
   const WINDOW_SECONDS = { '1h': 3600, '24h': 86400, '7d': 604800, all: Infinity };
 
-  return { esc, fmtN, compact, ago, when, ms, nav, stream, live, perMinute, spark, binTimes, rows, bars, segment, color, token, isDark, WINDOW_SECONDS, countryKey, mix, choroFill, stackedSpark, delta, appName, aliasConnections };
+  return { esc, fmtN, compact, ago, when, ms, nav, stream, live, perMinute, spark, binTimes, rows, bars, segment, color, token, isDark, WINDOW_SECONDS, countryKey, mix, choroFill, stackedSpark, delta, appName, appInfo, aliasConnections };
 })();
