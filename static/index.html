@@ -58,13 +58,21 @@
   .world-btn { background:var(--panel); color:var(--text); border:1px solid var(--line); border-radius:6px;
                padding:5px 10px; font:inherit; cursor:pointer; box-shadow:0 1px 4px rgba(0,0,0,.4); }
   .world-btn:hover { border-color:var(--accent); }
+  .pop button.tr, .route button { background:none; border:1px solid var(--line); color:var(--dim); border-radius:4px;
+       padding:0 5px; font:inherit; font-size:10px; cursor:pointer; }
+  .pop button.tr:hover, .route button:hover { border-color:var(--accent); color:var(--text); }
+  .route li { display:grid; grid-template-columns:18px 1fr 52px; gap:6px; padding:2px 0; border-bottom:1px solid var(--line); color:var(--dim); }
+  .route li b { color:var(--text); font-weight:500; }
+  .route li .ms { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .route li.silent { opacity:.6; }
+  .route .sum { margin:4px 0 6px; }
 </style>
 </head>
 <body>
 <aside>
   <h1>net<span>map</span></h1>
   <div class="sub" id="home">Where this laptop is calling</div>
-  <div class="sub"><a href="/devices" style="color:var(--accent);text-decoration:none">LAN devices →</a></div>
+  <div class="sub"><a href="/devices" style="color:var(--accent);text-decoration:none">LAN devices</a> · <a href="/sites" style="color:var(--accent);text-decoration:none">Site traces</a></div>
   <div class="stats">
     <div class="stat"><b id="s-dest">0</b><small>destinations</small></div>
     <div class="stat"><b id="s-proc">0</b><small>apps</small></div>
@@ -73,6 +81,11 @@
   <div class="seg" id="window">
     <button data-w="live">Live</button><button data-w="900">15m</button>
     <button data-w="3600">1h</button><button data-w="all" class="on">All</button>
+  </div>
+
+  <div id="route-box" style="display:none">
+    <h2>Route <span class="muted" id="route-title"></span> <button class="world-btn" style="padding:1px 6px;font-size:10px" id="route-clear">clear</button></h2>
+    <div class="route"><div class="sum muted" id="route-sum"></div><ul id="route"></ul></div>
   </div>
 
   <h2>Live <span class="muted" id="rate"></span></h2>
@@ -236,7 +249,7 @@ function popup(g, isLive) {
   return `<div class="pop"><h3>${esc(g.place)} <span class="muted">· ${g.ips.size} IP${g.ips.size > 1 ? 's' : ''}</span></h3><table>` +
     rows.map(r => `<tr><td><span class="dot ${r.live ? 'live' : ''}" style="display:inline-block;background:${color([...r.procs][0])}"></span></td>
       <td class="h"><b>${esc(r.names[0] || r.hostname || r.ip)}</b>${r.names.length > 1 ? `<br>${r.names.slice(1).map(esc).join('<br>')}` : ''}<br><span class="muted">${esc(r.org || '')} · ${esc(r.ip)}${r.names.length && r.hostname ? ' · ' + esc(r.hostname) : ''}</span></td>
-      <td>${[...r.procs].map(esc).join('<br>')}<br><span class="muted">${[...r.ports].map(esc).join(' ')}</span></td></tr>`).join('') +
+      <td>${[...r.procs].map(esc).join('<br>')}<br><span class="muted">${[...r.ports].map(esc).join(' ')}</span><br><button class="tr" onclick="traceRoute('${esc(r.ip)}')">route</button></td></tr>`).join('') +
     `</table>${byIp.size > 30 ? `<div class="muted">…and ${byIp.size - 30} more</div>` : ''}</div>`;
 }
 
@@ -337,6 +350,49 @@ function flash(e) {
   };
   requestAnimationFrame(step);
 }
+// --- route traces: traceroute hops drawn as a path through the hops that geolocate -----------
+const route = { layers: [], ip: null };
+function clearRoute() {
+  for (const l of route.layers) l.remove();
+  route.layers = []; route.ip = null;
+  document.getElementById('route-box').style.display = 'none';
+}
+async function traceRoute(ip, fresh = false) {
+  clearRoute();
+  route.ip = ip;
+  const box = document.getElementById('route-box'), list = document.getElementById('route'), sum = document.getElementById('route-sum');
+  box.style.display = ''; document.getElementById('route-title').textContent = ip;
+  sum.textContent = 'tracing… (up to ~30 s)'; list.innerHTML = '';
+  location.hash = `trace=${ip}`;
+  let t;
+  try { t = await (await fetch(`/api/trace/${encodeURIComponent(ip)}${fresh ? '?fresh=1' : ''}`)).json(); }
+  catch (e) { sum.textContent = `trace failed: ${e}`; return; }
+  if (route.ip !== ip) return;             // user started another trace meanwhile
+  if (t.error) { sum.textContent = t.error; return; }
+  const home = state.data?.home;
+  const placed = t.hops.filter(h => h.lat != null);
+  const pts = [...(home ? [[home.lat, home.lon]] : []), ...placed.map(h => [h.lat, h.lon])];
+  if (pts.length >= 2) {
+    const line = L.polyline(pts, { color: '#fff', weight: 2, opacity: 0.85, dashArray: '6 6', interactive: false }).addTo(map);
+    route.layers.push(line);
+    map.fitBounds(line.getBounds().pad(0.2));
+  }
+  for (const h of placed) {
+    const m = L.circleMarker([h.lat, h.lon], { radius: 5, color: '#fff', fillColor: '#111418', fillOpacity: 1, weight: 2 }).addTo(map)
+      .bindTooltip(`#${h.n} ${h.rdns || h.ip} · ${h.org || ''} · ${h.city ? h.city + ', ' : ''}${h.country || ''} · ${h.rtt_ms.toFixed(1)} ms`);
+    route.layers.push(m);
+  }
+  const silent = t.hops.filter(h => !h.ip).length;
+  const place = h => h.private ? 'private' : h.city ? `${h.city}, ${h.country}` : h.country || 'no location';
+  sum.innerHTML = `${t.hops.length} hops · ${placed.length} on the map · ${silent} silent · ${t.seconds.toFixed(1)} s · ${t.reached ? 'reached' : t.truncated ? 'gave up before the end' : 'incomplete'} · ${tracedAgo(t.ts)} <button id="route-again">again</button>`;
+  list.innerHTML = t.hops.map(h => h.ip
+    ? `<li><span>${h.n}</span><span><b>${esc(h.rdns || h.ip)}</b>${h.rdns ? `<br>${esc(h.ip)}` : ''}<br>${esc(h.org || '')}${h.org ? ' · ' : ''}${esc(place(h))}</span><span class="ms">${h.rtt_ms.toFixed(1)} ms</span></li>`
+    : `<li class="silent"><span>${h.n}</span><span>no answer</span><span class="ms">–</span></li>`).join('');
+  document.getElementById('route-again').onclick = () => traceRoute(ip, true);
+}
+document.getElementById('route-clear').onclick = () => { clearRoute(); history.replaceState(null, '', ' '); };
+function tracedAgo(ts) { const s = Date.now() / 1000 - ts; return s < 90 ? 'just now' : s < 5400 ? `${Math.round(s / 60)}m ago` : `${Math.round(s / 3600)}h ago`; }
+
 const stream = new EventSource('/api/stream');
 stream.onmessage = m => {
   const e = JSON.parse(m.data);
@@ -351,6 +407,8 @@ setInterval(renderLive, 5000);
 async function poll() {
   try {
     state.data = await (await fetch('/api/data')).json();
+    const m = /^#trace=([0-9a-f.:]+)$/i.exec(location.hash);
+    if (m && !route.ip) traceRoute(m[1]);
     render();
   } catch (e) { console.warn('poll failed', e); }
 }

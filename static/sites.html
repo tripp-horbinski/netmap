@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>netmap · site traces</title>
+<style>
+  :root { --bg:#111418; --panel:#171b21; --line:#262c35; --text:#d8dee6; --dim:#7d8794; --accent:#4fd1c5; --warn:#e8b04b; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--text);
+               font: 13px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; }
+  body { display:flex; }
+  a { color:var(--accent); text-decoration:none; }
+  aside { width:380px; flex:none; background:var(--panel); border-right:1px solid var(--line);
+          overflow-y:auto; padding:16px 16px 32px; }
+  main { flex:1; overflow-y:auto; padding:20px 28px 40px; }
+  h1 { font-size:18px; margin:0 0 2px; letter-spacing:.3px; }
+  h1 span { color:var(--accent); }
+  h2 { font-size:11px; text-transform:uppercase; letter-spacing:.8px; color:var(--dim);
+       margin:20px 0 6px; font-weight:600; }
+  h3 { font-size:16px; margin:0; }
+  .sub { color:var(--dim); margin-bottom:12px; }
+  .seg { display:flex; gap:4px; margin-top:12px; }
+  .seg button { flex:1; background:#1d222a; color:var(--text); border:1px solid var(--line);
+                border-radius:6px; padding:5px 0; cursor:pointer; font:inherit; }
+  .seg button.on { background:var(--accent); color:#0b0d10; border-color:var(--accent); font-weight:600; }
+  input.filter { width:100%; margin-top:10px; background:#1d222a; color:var(--text); border:1px solid var(--line);
+                 border-radius:6px; padding:5px 8px; font:inherit; }
+  ul { list-style:none; margin:0; padding:0; }
+  li.row { display:grid; grid-template-columns:1fr 40px 40px; align-items:center; gap:8px;
+           padding:6px 8px; border-radius:6px; cursor:pointer; }
+  li.row:hover { background:#1f252d; }
+  li.row.sel { background:#24303a; outline:1px solid var(--accent); }
+  .name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .name small { display:block; color:var(--dim); }
+  .n { color:var(--dim); font-variant-numeric:tabular-nums; text-align:right; }
+  .n.warn { color:var(--warn); }
+  .muted { color:var(--dim); }
+  .stats { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin:14px 0; max-width:640px; }
+  .stat { background:#1d222a; border:1px solid var(--line); border-radius:8px; padding:8px 10px; }
+  .stat b { display:block; font-size:20px; font-variant-numeric:tabular-nums; }
+  .stat small { color:var(--dim); }
+  table { border-collapse:collapse; width:100%; max-width:820px; }
+  th { text-align:left; color:var(--dim); font-weight:600; font-size:11px; text-transform:uppercase;
+       letter-spacing:.6px; padding:4px 8px; border-bottom:1px solid var(--line); }
+  th.n, td.n { text-align:right; white-space:nowrap; }
+  td { padding:4px 8px; border-bottom:1px solid var(--line); vertical-align:top; overflow-wrap:anywhere; }
+  .tag { display:inline-block; font-size:10px; padding:1px 5px; border-radius:4px; border:1px solid var(--warn);
+         color:var(--warn); margin-left:6px; vertical-align:middle; }
+  .tag.fp { border-color:var(--accent); color:var(--accent); }
+  .empty { color:var(--dim); padding:40px 0; }
+  button.go { background:none; border:1px solid var(--line); color:var(--text); border-radius:6px; padding:5px 10px; cursor:pointer; font:inherit; }
+  button.go:hover { border-color:var(--accent); }
+  button.go.small { font-size:11px; padding:1px 6px; margin-left:8px; vertical-align:middle; color:var(--dim); }
+  /* waterfall: one row per host, a bar from 0 to its offset within the load */
+  .wf { max-width:820px; margin-top:6px; }
+  .wf .r { display:grid; grid-template-columns:280px 1fr 56px; align-items:center; gap:10px; padding:2px 0; }
+  .wf .r:hover { background:#1a1f26; }
+  .wf .h { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .wf .h small { color:var(--dim); margin-left:6px; }
+  .wf .bar { height:8px; border-radius:4px; background:var(--accent); min-width:3px; }
+  .wf .bar.t { background:var(--warn); }
+  .wf .bar.fp { background:var(--text); }
+  .wf .track { position:relative; height:10px; }
+  .wf .track .bar { position:absolute; left:0; top:1px; }
+  .wf .ms { color:var(--dim); font-variant-numeric:tabular-nums; text-align:right; font-size:11px; }
+  .legend { display:flex; gap:14px; color:var(--dim); font-size:11px; margin:6px 0 2px; }
+  .legend i { display:inline-block; width:10px; height:8px; border-radius:4px; margin-right:4px; vertical-align:middle; }
+  .note { color:var(--dim); font-size:12px; max-width:820px; margin-top:4px; }
+</style>
+</head>
+<body>
+<aside>
+  <h1>net<span>map</span> <span class="muted">· site traces</span></h1>
+  <div class="sub">What loading a site pulls in · <a href="/">map</a> · <a href="/devices">devices</a></div>
+  <div class="seg" id="window">
+    <button data-w="1h">1h</button><button data-w="24h" class="on">24h</button>
+    <button data-w="7d">7d</button><button data-w="all">All</button>
+  </div>
+  <input class="filter" id="filter" placeholder="Filter sites…">
+  <h2>Sites <span class="muted" id="count"></span></h2>
+  <ul id="sites"><li class="muted">Loading…</li></ul>
+</aside>
+<main id="main"><div class="empty">Pick a site.</div></main>
+
+<script>
+const state = { win: '24h', site: null, list: [], detail: null, q: '' };
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const fmtN = (n) => n.toLocaleString();
+const ms = (s) => (s < 1 ? `${Math.round(s * 1000)} ms` : `${s.toFixed(1)} s`);
+const ago = (ts) => {
+  const s = Date.now() / 1000 - ts;
+  if (s < 90) return `${Math.round(s)}s ago`;
+  if (s < 5400) return `${Math.round(s / 60)}m ago`;
+  if (s < 172800) return `${Math.round(s / 3600)}h ago`;
+  return `${Math.round(s / 86400)}d ago`;
+};
+const when = (ts) => new Date(ts * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit' });
+
+function renderList() {
+  const q = state.q.toLowerCase();
+  const list = state.list.filter((s) => !q || s.site.includes(q));
+  $('count').textContent = list.length ? `(${list.length})` : '';
+  if (!list.length) { $('sites').innerHTML = '<li class="muted">No loads in this window.</li>'; return; }
+  $('sites').innerHTML = list.map((s) => `
+    <li class="row${s.site === state.site ? ' sel' : ''}" data-site="${esc(s.site)}">
+      <div class="name">${esc(s.site)}<small>${fmtN(s.loads)} load${s.loads === 1 ? '' : 's'} · ${ago(s.last)}</small></div>
+      <div class="n" title="third-party hosts">${fmtN(s.third_party)}</div>
+      <div class="n${s.trackers ? ' warn' : ''}" title="tracker hosts">${fmtN(s.trackers)}</div>
+    </li>`).join('');
+  for (const li of $('sites').querySelectorAll('li.row')) li.onclick = () => select(li.dataset.site);
+}
+
+function rows(list, cols, empty) {
+  if (!list.length) return `<div class="muted">${empty}</div>`;
+  return `<table><thead><tr>${cols.map((c) => `<th class="${c.n ? 'n' : ''}">${c.h}</th>`).join('')}</tr></thead>
+    <tbody>${list.map((r) => `<tr>${cols.map((c) => `<td class="${c.n ? 'n' : ''}">${c.f(r)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+}
+const tags = (h) => (h.first_party || h.domain === state.site ? '<span class="tag fp">first party</span>' : '') + (h.tracker ? '<span class="tag">tracker</span>' : '');
+
+function waterfall(load) {
+  if (!load) return '<div class="muted">No load recorded.</div>';
+  const span = Math.max(0.25, ...load.hits.map((h) => h.offset));
+  return `
+    <div class="muted">${when(load.start)} · ${esc(load.app)} · ${fmtN(load.hits.length)} hosts over ${ms(load.end - load.start)}</div>
+    <div class="legend"><span><i style="background:var(--text)"></i>first party</span><span><i style="background:var(--accent)"></i>third party</span><span><i style="background:var(--warn)"></i>tracker</span></div>
+    <div class="wf">${load.hits.map((h) => `
+      <div class="r" title="${esc(h.name)} · ${esc(h.org ?? 'unknown org')} · ${esc(h.country ?? '')} · +${ms(h.offset)}">
+        <div class="h">${esc(h.name)}<small>${esc(h.org ?? '')}</small></div>
+        <div class="track"><div class="bar${h.tracker ? ' t' : h.domain === load.site ? ' fp' : ''}" style="width:${Math.max(0.6, (100 * h.offset) / span).toFixed(1)}%"></div></div>
+        <div class="ms">+${ms(h.offset)}</div>
+      </div>`).join('')}</div>`;
+}
+
+function renderDetail() {
+  const d = state.detail;
+  if (!d) { $('main').innerHTML = '<div class="empty">Pick a site.</div>'; return; }
+  const s = d.summary;
+  $('main').innerHTML = `
+    <h3>${esc(s.site)} ${d.pinned ? '<span class="tag fp">pinned</span>' : ''}
+      <button class="go small" id="pin-site" title="${d.pinned ? 'Stop treating this as a site you visit' : 'Always treat this as a site you visit, even mid-burst'}">${d.pinned ? 'Unpin' : 'Pin as site'}</button></h3>
+    <div class="muted">${fmtN(s.loads)} load${s.loads === 1 ? '' : 's'} from ${s.apps.map(esc).join(', ')} · last ${ago(s.last)}</div>
+    <div class="stats">
+      <div class="stat"><b>${fmtN(s.hosts)}</b><small>hosts</small></div>
+      <div class="stat"><b>${fmtN(s.third_party)}</b><small>third-party hosts</small></div>
+      <div class="stat"><b>${fmtN(s.orgs)}</b><small>companies</small></div>
+      <div class="stat"><b>${fmtN(s.trackers)}</b><small>tracker hosts</small></div>
+    </div>
+    <h2>Latest load</h2>
+    ${waterfall(d.latest)}
+    <h2>Everything it pulls in <span class="muted">across ${fmtN(s.loads)} load${s.loads === 1 ? '' : 's'}</span></h2>
+    ${rows(d.hosts, [
+      { h: 'host', f: (r) => esc(r.name) + tags(r) + (r.first_party || r.tracker ? '' : ` <button class="go small pin" data-name="${esc(r.name)}" title="This is a site I visited, not something ${esc(s.site)} pulled in">site?</button>`) },
+      { h: 'company', f: (r) => esc(r.org ?? '') },
+      { h: 'country', f: (r) => esc(r.country ?? '') },
+      { h: 'in loads', n: true, f: (r) => `${fmtN(r.loads)}/${fmtN(s.loads)}` },
+      { h: 'typical', n: true, f: (r) => '+' + ms(r.median_offset) },
+    ], 'Nothing.')}
+    <h2>Companies</h2>
+    ${rows(d.orgs, [
+      { h: 'company', f: (r) => esc(r.org) + (r.tracker ? '<span class="tag">tracker</span>' : '') },
+      { h: 'hosts', n: true, f: (r) => fmtN(r.hosts) },
+    ], 'Nothing.')}
+    <h2>Loads</h2>
+    ${rows(d.loads.slice(0, 40), [
+      { h: 'when', f: (r) => when(r.start) },
+      { h: 'app', f: (r) => esc(r.app) },
+      { h: 'hosts', n: true, f: (r) => fmtN(r.hosts) },
+      { h: 'trackers', n: true, f: (r) => fmtN(r.trackers) },
+    ], 'Nothing.')}
+    <p class="note">A load is a burst of new connections from one app (3 s of quiet or 20 s ends it, and a www. or apex host
+      of another site, or a pinned site, starts a new one); the site is the first name in the burst that is not a tracker,
+      browser plumbing, a CDN or a bare IP. Connections a browser kept open from an earlier visit do not reappear, so a revisit
+      can show fewer hosts or be rooted at its first new third party. If a host listed here is really a site you visited,
+      mark it with <em>site?</em> and its loads split out from now on.</p>`;
+  const pin = async (name, pinned) => {
+    await fetch('/api/sites/known', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, pinned }) });
+    await refresh();
+  };
+  $('pin-site').onclick = () => pin(s.site, !d.pinned);
+  for (const b of $('main').querySelectorAll('button.pin')) b.onclick = () => pin(b.dataset.name, true);
+}
+
+async function select(site) {
+  state.site = site;
+  history.replaceState(null, '', `#${encodeURIComponent(site)}`);
+  await refresh();
+}
+
+async function refresh() {
+  const q = `since=${encodeURIComponent(state.win)}`;
+  const [list, detail] = await Promise.all([
+    fetch(`/api/sites?${q}`).then((r) => r.json()),
+    state.site ? fetch(`/api/sites/${encodeURIComponent(state.site)}?${q}`).then((r) => (r.ok ? r.json() : null)) : null,
+  ]);
+  state.list = list; state.detail = detail;
+  renderList(); renderDetail();
+}
+
+for (const b of document.querySelectorAll('#window button')) {
+  b.onclick = () => {
+    document.querySelector('#window .on')?.classList.remove('on');
+    b.classList.add('on');
+    state.win = b.dataset.w;
+    refresh();
+  };
+}
+$('filter').oninput = () => { state.q = $('filter').value.trim(); renderList(); };
+state.site = decodeURIComponent(location.hash.slice(1)) || null;
+refresh();
+setInterval(refresh, 15000);
+</script>
+</body>
+</html>

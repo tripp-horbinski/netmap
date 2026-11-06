@@ -12,6 +12,8 @@ import { $ } from "bun";
 import { Geo } from "./geo";
 import { NetmapDb } from "./db";
 import { LanDb } from "./lan";
+import { SitesDb } from "./sites";
+import { Tracer, isIp } from "./trace";
 
 const COMPILED = import.meta.dir.startsWith("/$bunfs");
 const INTERVAL = 2.0; // seconds between netlog's lsof polls; the page uses it for the "live" window
@@ -32,7 +34,7 @@ const DB_PATH = args.db ?? join(DATA, "netmap.sqlite");
 
 interface Home { lat: number; lon: number; label: string }
 
-async function findHome(override: string | undefined): Promise<Home | null> {
+async function findHome(override: string | undefined, geo: Geo | null): Promise<Home | null> {
   if (override) {
     const [lat, lon] = override.split(",").map(Number);
     if (lat === undefined || lon === undefined || Number.isNaN(lat) || Number.isNaN(lon)) {
@@ -40,7 +42,6 @@ async function findHome(override: string | undefined): Promise<Home | null> {
     }
     return { lat, lon, label: "This laptop" };
   }
-  const geo = await Geo.open(DATA);
   if (!geo) {
     console.error("no geolocation database in data/; run ./setup.sh to place the home marker");
     return null;
@@ -60,7 +61,10 @@ async function findHome(override: string | undefined): Promise<Home | null> {
 
 const db = new NetmapDb(DB_PATH);
 const lan = new LanDb(db.db);
-const home = await findHome(args.home);
+const sites = new SitesDb(db.db);
+const geo = await Geo.open(DATA);
+const home = await findHome(args.home, geo);
+const tracer = new Tracer(db.db, geo);
 
 function json(body: unknown, status = 200): Response {
   return Response.json(body, { status, headers: { "Cache-Control": "no-store" } });
@@ -115,6 +119,10 @@ function windowOf(req: Request): string {
   return new URL(req.url).searchParams.get("since") ?? "24h";
 }
 
+function browsersOnly(req: Request): boolean {
+  return new URL(req.url).searchParams.get("apps") !== "all";
+}
+
 function withWindow(fn: (window: string) => unknown): (req: Request) => Response {
   return (req) => {
     try {
@@ -142,6 +150,38 @@ const server = Bun.serve({
     "/api/stream": { GET: () => stream() },
     "/api/reset": { POST: () => { db.reset(); return json({ ok: true }); } },
     "/devices": { GET: () => staticFile("/devices.html") },
+    "/sites": { GET: () => staticFile("/sites.html") },
+    "/api/sites": { GET: (req) => withWindow((w) => sites.sites(w, browsersOnly(req)))(req) },
+    "/api/trace/:ip": {
+      GET: async (req) => {
+        const ip = decodeURIComponent(req.params.ip);
+        if (!isIp(ip)) return json({ error: "expected an IP address" }, 400);
+        const fresh = new URL(req.url).searchParams.get("fresh") === "1";
+        try {
+          return json(await tracer.trace(ip, fresh));
+        } catch (e) {
+          return json({ error: String(e instanceof Error ? e.message : e) }, 500);
+        }
+      },
+    },
+    "/api/sites/known": {
+      GET: () => json(sites.known()),
+      POST: async (req) => {
+        const body = (await req.json().catch(() => null)) as { name?: unknown; pinned?: unknown } | null;
+        if (!body || typeof body.name !== "string" || body.name.trim() === "") return json({ error: "expected {name: string, pinned?: boolean}" }, 400);
+        return json(sites.pin(body.name.trim(), body.pinned !== false));
+      },
+    },
+    "/api/sites/:site": {
+      GET: (req) => {
+        try {
+          const detail = sites.site(decodeURIComponent(req.params.site), windowOf(req), browsersOnly(req));
+          return detail ? json(detail) : json({ error: "no loads of that site in this window" }, 404);
+        } catch (e) {
+          return json({ error: String(e instanceof Error ? e.message : e) }, 400);
+        }
+      },
+    },
     "/api/devices": { GET: withWindow((w) => lan.devices(w)) },
     "/api/devices/:ip": {
       GET: (req) => {

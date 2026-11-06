@@ -57,6 +57,25 @@ never asked for before the chosen window. Click a row to name a device; it's the
 `POST /api/devices/IP/name {"label": "..."}`. The tracker list and `base_domain()` are mirrored
 from `netlog/src/trackers.rs` and `db.rs` in `viewer/trackers.ts`; change both together.
 
+`/sites` is the dependency-trace view: what loading one website pulls in. A load is a burst of
+new connections from one app (3 s of quiet or 20 s ends it, and a `www.` host of another site
+starts a new one); the site is the first name in the burst that is not a tracker, browser
+plumbing, a CDN or a bare IP, and everything else in the burst is attributed to it. The page shows
+a waterfall of the richest recent load plus the hosts, companies and trackers across all loads.
+Browsers only by default; `?apps=all` includes CLIs and daemons. The lists of plumbing and
+never-a-root domains live in `viewer/sites.ts`. API: `GET /api/sites?since=24h`,
+`GET /api/sites/DOMAIN?since=24h`. Known limits: connections a browser kept open from an earlier
+visit never reappear, and a second site opened inside the gap without a `www.` host merges into the first.
+Pin a host as a site from the page (or `POST /api/sites/known {"name": "tripp.horbin.ski"}`) when the
+heuristics get it wrong; pinned sites live in netlog's `meta` table and always split out their own loads.
+
+**Route traces** on the map: the *route* button in any destination popup runs the system
+`traceroute` in ICMP mode (setuid on macOS, so no sudo; UDP probes die at AT&T) and draws the path
+through every hop that geolocates, with the full hop list in the sidebar. Results cache for six
+hours in a `traces` table; *again* reruns. `GET /api/trace/IP[?fresh=1]`, or open the map at
+`/#trace=IP`. The probe gives up after six silent hops in a row. Hop locations are the DB-IP guess
+for the block, which is often the carrier's regional hub rather than the router's city.
+
 ## Run it as a service
 
 ```sh
