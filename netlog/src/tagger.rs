@@ -139,6 +139,17 @@ mod tests {
         assert_eq!(o.epid, Some(37571));
     }
 
+    /// Lines exactly as macOS tcpdump 4.99.1 (Apple 161) printed them with `-k NP -n -l -q -tt`.
+    #[test]
+    fn real_output() {
+        let udp = parse_line("1793991985.817348 (proc mDNSResponder:562) IP 192.168.1.79.51264 > 1.0.0.1.443: UDP, length 1200").unwrap();
+        assert_eq!((udp.comm.as_str(), udp.pid, udp.proto, udp.local_port, udp.epid), ("mDNSResponder", 562, "UDP", 51264, None));
+        let tcp = parse_line("1793991985.921385 (proc mDNSResponder:562) IP 192.168.1.79.65081 > 1.0.0.1.443: tcp 0").unwrap();
+        assert_eq!((tcp.proto, tcp.local_port), ("TCP", 65081));
+        assert!(parse_line("listening on pktap,en0, link-type PKTAP (Apple DLT_PKTAP), snapshot length 524288 bytes").is_none());
+        assert!(parse_line("6 packets captured").is_none());
+    }
+
     #[test]
     fn junk_is_ignored() {
         assert!(parse_line("tcpdump: data link type PKTAP").is_none());

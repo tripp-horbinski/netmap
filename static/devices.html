@@ -27,7 +27,7 @@
   </div>
   <h2>Devices <span class="muted" id="count"></span></h2>
   <ul class="list" id="devices"><li class="muted">Loading…</li></ul>
-  <p class="muted" id="hint">Devices appear here once they use this Mac (192.168.1.98) as DNS.
+  <p class="muted" id="hint">Devices appear here once they use this Mac as DNS.
      Name them by clicking a row.</p>
 </aside>
 <main id="main"><div class="empty">Pick a device.</div></main>
@@ -44,6 +44,7 @@ function renderList() {
   const { devices, window: win } = state.list;
   $('count').textContent = devices.length ? `(${devices.length})` : '';
   $('hint').style.display = devices.length > 1 ? 'none' : '';
+  $('hint').innerHTML = `Devices appear here once they use this Mac${state.list.lan_ip ? ` (<b>${esc(state.list.lan_ip)}</b>)` : ''} as their DNS server. Name them by clicking a row.`;
   if (!devices.length) { $('devices').innerHTML = '<li class="muted">No devices yet. Is <code>netlog resolve</code> running?</li>'; return; }
   $('devices').innerHTML = devices.map((d) => `
     <li class="row${d.ip === state.ip ? ' sel' : ''}" data-ip="${esc(d.ip)}">

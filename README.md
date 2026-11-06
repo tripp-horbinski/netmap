@@ -157,7 +157,7 @@ netlog/target/release/netlog report device --device "Living room TV" --since 24h
 ```
 
 Setup, once: give the Mac a DHCP reservation in the router (so its IP never changes), then set the
-router's DHCP DNS server to the Mac's IP (currently 192.168.1.98) with the router itself or 1.1.1.1
+router's DHCP DNS server to the Mac's IP (the devices page shows it) with the router itself or 1.1.1.1
 as the secondary. Devices pick it up on their next DHCP renew; toggling Wi-Fi forces it.
 
 Caveats: the secondary DNS means devices silently bypass the log sometimes, especially while the

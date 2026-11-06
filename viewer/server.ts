@@ -9,6 +9,7 @@
 import { parseArgs } from "node:util";
 import { join, normalize, resolve } from "node:path";
 import { $ } from "bun";
+import { networkInterfaces } from "node:os";
 import { Geo } from "./geo";
 import { NetmapDb } from "./db";
 import { LanDb } from "./lan";
@@ -67,6 +68,14 @@ const browser = new BrowserDb(db.db, geo);
 const sites = new SitesDb(db.db, browser);
 const home = await findHome(args.home, geo);
 const tracer = new Tracer(db.db, geo);
+
+/** This machine's LAN IPv4 (what devices must use as their DNS server). Re-read on each call: DHCP moves it. */
+function lanIp(): string | null {
+  for (const list of Object.values(networkInterfaces())) for (const a of list ?? []) {
+    if (a.family === "IPv4" && !a.internal && /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(a.address)) return a.address;
+  }
+  return null;
+}
 
 function json(body: unknown, status = 200): Response {
   return Response.json(body, { status, headers: { "Cache-Control": "no-store" } });
@@ -210,7 +219,7 @@ const server = Bun.serve({
         }
       },
     },
-    "/api/devices": { GET: withWindow((w) => lan.devices(w)) },
+    "/api/devices": { GET: withWindow((w) => ({ ...lan.devices(w), lan_ip: lanIp() })) },
     "/api/devices/:ip": {
       GET: (req) => {
         try {
