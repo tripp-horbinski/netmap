@@ -15,6 +15,7 @@ import { NetmapDb } from "./db";
 import { LanDb } from "./lan";
 import { SitesDb } from "./sites";
 import { BrowserDb } from "./browser";
+import { FindingsDb } from "./findings";
 import { Tracer, isIp } from "./trace";
 
 const COMPILED = import.meta.dir.startsWith("/$bunfs");
@@ -66,6 +67,7 @@ const geo = await Geo.open(DATA);
 const lan = new LanDb(db.db);
 const browser = new BrowserDb(db.db, geo);
 const sites = new SitesDb(db.db, browser);
+const findings = new FindingsDb(db.db, sites);
 const home = await findHome(args.home, geo);
 const tracer = new Tracer(db.db, geo);
 
@@ -201,6 +203,14 @@ const server = Bun.serve({
       },
     },
     "/api/browser/status": { GET: () => json(browser.status()) },
+    "/api/findings": { GET: withWindow((w) => findings.report(w)) },
+    "/api/findings/expect": {
+      POST: async (req) => {
+        const body = (await req.json().catch(() => null)) as { key?: unknown; title?: unknown; expected?: unknown } | null;
+        if (!body || typeof body.key !== "string" || !body.key) return json({ error: "expected {key: string, title?: string, expected?: boolean}" }, 400);
+        return json(findings.expect(body.key, typeof body.title === "string" ? body.title : body.key, body.expected !== false));
+      },
+    },
     "/api/sites/graph": { GET: (req) => withWindow((w) => sites.graph(w, browsersOnly(req)))(req) },
     "/api/sites/known": {
       GET: () => json(sites.known()),

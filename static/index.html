@@ -17,37 +17,29 @@ if (/^#trace=/.test(location.hash)) location.replace('/map' + location.hash);</s
 <header id="nav"></header>
 <div class="page">
   <div class="toolbar">
-    <div><h1>Overview</h1><div class="sub" id="home">Everything this Mac and the LAN are talking to</div></div>
+    <div><h1>Overview</h1><div class="sub" id="home">What changed on this network, against its own baseline</div></div>
     <div class="grow"></div>
     <div class="seg" id="window">
       <button data-w="1h">1h</button><button data-w="24h">24h</button><button data-w="7d">7d</button><button data-w="all">All</button>
     </div>
   </div>
 
-  <div class="overview-top">
-    <div class="card hero-card">
-      <div class="hero"><span class="value" id="h-rate">0</span><span class="what">connection opens in the last minute</span></div>
-      <div class="muted" id="h-sub">last 15 minutes</div>
-      <div id="h-spark"></div>
+  <div class="status" id="status"><span class="big">Loading…</span></div>
+  <div class="findings" id="findings"></div>
+
+  <div class="grid main" style="grid-template-columns: minmax(260px, 1fr) minmax(0, 2.4fr); align-items: start">
+    <div class="card normal"><h2>What's normal <span class="muted" id="base-days"></span></h2><div id="normal" class="muted">Loading…</div></div>
+    <div>
+      <div class="strip" id="tiles"></div>
+      <div class="card hero-card" style="margin-top:10px"><div class="hero" style="gap:8px"><span class="value" id="h-rate" style="font-size:28px">0</span><span class="what">opens in the last minute</span><span class="muted" id="h-sub" style="margin-left:auto"></span></div><div id="h-spark"></div></div>
     </div>
-    <div class="tiles" id="tiles"></div>
   </div>
 
   <div class="grid main">
     <div class="card"><h2>Where it goes <a href="/map">open the map →</a></h2><div id="mini"></div></div>
     <div class="card"><h2>Live <span class="muted" id="rate"></span></h2><ul class="list feed" id="live"><li class="muted">Waiting for new connections…</li></ul></div>
   </div>
-
-  <div class="grid three">
-    <div class="card"><h2>Sites visited <a href="/sites">all →</a></h2><ul class="list" id="sites"><li class="muted">Loading…</li></ul></div>
-    <div class="card"><h2>LAN devices <a href="/devices">all →</a></h2><ul class="list" id="devices"><li class="muted">Loading…</li></ul></div>
-    <div class="card"><h2>Apps <span class="muted">by destinations</span><a href="/map">map →</a></h2><ul class="list bars" id="apps"></ul></div>
-  </div>
-
-  <div class="grid two">
-    <div class="card"><h2>Who they talk to <span class="muted">networks by destinations</span></h2><ul class="list bars" id="orgs"></ul></div>
-    <div class="card"><h2>Newest destinations</h2><ul class="list feed" id="feed"></ul></div>
-  </div>
+  <p class="note">Detail lives on the other pages: <a href="/map">map</a> for apps and destinations, <a href="/devices">devices</a> for the LAN, <a href="/sites">sites</a> for what each site pulls in.</p>
 </div>
 
 <script>
@@ -55,7 +47,7 @@ const { esc, fmtN, compact, ago, when, spark, binTimes, bars, color, token, stac
 // The window of the same length just before the current one, for the deltas on the tiles.
 const PRIOR = { '1h': '2h', '24h': '48h', '7d': '14d' };
 const $ = (id) => document.getElementById(id);
-const state = { win: '24h', data: null, devices: null, sites: null, devices2: null, sites2: null };
+const state = { win: '24h', data: null, devices: null, sites: null, devices2: null, sites2: null, findings: null };
 nm.nav('/');
 
 // ---- mini map: countries + one dot per place, no controls; click goes to the full map --------
@@ -113,7 +105,7 @@ function render() {
   const lastMin = recent.filter((c) => d.now - c.first_seen < 60).length;
   const prevMin = recent.filter((c) => d.now - c.first_seen >= 60 && d.now - c.first_seen < 120).length;
   $('h-rate').textContent = fmtN(lastMin);
-  $('h-sub').innerHTML = `${delta(lastMin, prevMin, 'minute')} · last 15 minutes by app`;
+  $('h-sub').innerHTML = `${delta(lastMin, prevMin, 'minute')} · 15 min by app`;
   const perApp = new Map();
   for (const c of recent) (perApp.get(c.process) ?? perApp.set(c.process, []).get(c.process)).push(c.first_seen);
   const ranked = [...perApp].sort((a, b) => b[1].length - a[1].length);
@@ -179,43 +171,6 @@ function render() {
   }
   if (d.home && !homeMarker) homeMarker = L.circleMarker([d.home.lat, d.home.lon], { radius: 5, color: token('--panel'), fillColor: token('--accent'), fillOpacity: 1, weight: 2, interactive: false }).addTo(map);
 
-  // apps, orgs, newest
-  const byApp = new Map(), byOrg = new Map(), viaOf = nm.majorityVia(conns);
-  for (const c of conns) {
-    (byApp.get(c.process) ?? byApp.set(c.process, new Set()).get(c.process)).add(c.ip);
-    const o = c.org || 'Unknown network';
-    (byOrg.get(o) ?? byOrg.set(o, new Set()).get(o)).add(c.ip);
-  }
-  const top = (m, n) => [...m].map(([name, s]) => ({ name, n: s.size })).sort((a, b) => b.n - a.n).slice(0, n);
-  // Apps grouped under the app that launched them (via): parent rows carry the group total.
-  const tree = nm.groupByVia([...byApp].map(([name, s]) => ({ name, n: s.size, via: viaOf.get(name) ?? null })));
-  const maxApp = Math.max(1, ...tree.filter(([, d]) => d === 0).map(([g]) => g.n));
-  const bar = ([g, d]) => `<li class="${d ? 'sub' : ''}" style="--d:${d};--w:${(100 * g.n / maxApp).toFixed(1)}%"><span class="name">${esc(g.name)}</span><span class="n">${fmtN(g.n)}</span></li>`;
-  $('apps').innerHTML = tree.slice(0, 16).map(bar).join('') || '<li class="muted">Waiting for connections…</li>';
-  $('orgs').innerHTML = bars(top(byOrg, 10), 'Waiting for connections…');
-  const seen = new Map();
-  for (const c of conns) if (!seen.has(c.ip) || c.first_seen < seen.get(c.ip).first_seen) seen.set(c.ip, c);
-  $('feed').innerHTML = [...seen.values()].sort((a, b) => b.first_seen - a.first_seen).slice(0, 10).map((c) =>
-    `<li><span class="dot" style="background:${color(c.process)}"></span><span class="name"><b>${esc(c.process)}</b> → ${esc(c.names[0] || c.org || c.hostname || c.ip)}</span><span class="t">${esc(c.city || c.country || '?')} · ${ago(c.first_seen)}</span></li>`).join('') || '<li class="muted">Nothing in this window.</li>';
-
-  // devices & sites
-  if (state.devices) {
-    const w = state.devices.window;
-    $('devices').innerHTML = devs.slice(0, 8).map((x) => `
-      <a class="row" style="grid-template-columns:1fr 64px 48px" href="/devices#${encodeURIComponent(x.ip)}">
-        <div class="name">${esc(x.device)}<small>${esc(x.ip === x.device ? ago(x.last_seen) : x.ip + ' · ' + ago(x.last_seen))}</small></div>
-        ${spark(x.bins, w, { cls: 'row-spark' })}
-        <div class="n${x.tracker_lookups ? ' warn' : ''}" title="${fmtN(x.tracker_lookups)} tracker lookups">${compact(x.lookups)}</div></a>`).join('')
-      || '<li class="muted">No devices yet. Is <code>netlog resolve</code> running?</li>';
-  } else $('devices').innerHTML = '<li class="muted">Device data needs the Bun viewer.</li>';
-  if (state.sites) {
-    $('sites').innerHTML = sites.slice(0, 8).map((s) => `
-      <a class="row" style="grid-template-columns:1fr 40px 40px" href="/sites#${encodeURIComponent(s.site)}">
-        <div class="name" title="${esc(s.site)}">${esc(s.label ?? s.site)}<small>${fmtN(s.loads)} load${s.loads === 1 ? '' : 's'} · ${ago(s.last)}</small></div>
-        <div class="n" title="third-party hosts">${fmtN(s.third_party)}</div>
-        <div class="n${s.trackers ? ' warn' : ''}" title="tracker hosts">${fmtN(s.trackers)}</div></a>`).join('')
-      || '<li class="muted">No site loads in this window.</li>';
-  } else $('sites').innerHTML = '<li class="muted">Site traces need the Bun viewer.</li>';
 }
 
 // ---- live feed + ripples on the mini map --------------------------------------------------------
@@ -253,6 +208,41 @@ let pollTimer = null;
 nm.stream((e) => { renderLive(); flash(e); if (!pollTimer) pollTimer = setTimeout(() => { pollTimer = null; poll(); }, 500); });
 setInterval(renderLive, 5000);
 
+// ---- findings: what changed against the baseline ----------------------------------------------
+function renderFindings() {
+  const r = state.findings;
+  if (!r) return;
+  const n = r.findings.length;
+  const span = state.win === 'all' ? 'while' : state.win;
+  const hidden = r.expected_hidden ? ` · ${r.expected_hidden} expected, hidden` : '';
+  $('status').innerHTML = n
+    ? `<span class="big">${n} thing${n === 1 ? '' : 's'} worth a look</span><span class="muted">in the last ${span}${hidden}</span>`
+    : `<span class="big ok">Nothing unusual</span><span class="muted">in the last ${span}${hidden}${r.baseline.days < 1 ? ' · the baseline needs a day of history first' : ''}</span>`;
+  const sev = (s) => (s >= 90 ? 's4' : s >= 60 ? 's3' : 's2');
+  $('findings').innerHTML = r.findings.map((f) => `
+    <div class="finding ${sev(f.score)}"><i title="score ${f.score}"></i>
+      <div><div class="t">${esc(f.title)}</div><div class="d">${esc(f.detail)}${f.links.map((l) => ` <a href="${esc(l.href)}">${esc(l.label)} →</a>`).join('')}</div></div>
+      <div class="act"><span class="when">${ago(f.ts)}</span>${f.kind === 'health' ? '' : `<button class="btn small" data-expect="${esc(f.key)}" data-title="${esc(f.title)}" title="This is normal here: stop reporting it and count it as baseline">Expect</button>`}</div>
+    </div>`).join('');
+  for (const b of $('findings').querySelectorAll('[data-expect]')) b.onclick = () => expectFinding(b.dataset.expect, b.dataset.title, true);
+  const base = r.baseline;
+  $('base-days').textContent = base.days >= 1 ? `· ${Math.round(base.days)} day${Math.round(base.days) === 1 ? '' : 's'} of history` : '· building';
+  const merged = new Map(); // raw helpers alias to one product: sum their shares
+  for (const a of base.top_apps) { const n = nm.appName(a.app); merged.set(n, (merged.get(n) ?? 0) + a.share); }
+  const top = [...merged].sort((a, b) => b[1] - a[1]).map(([n, s]) => `${esc(n)} ${Math.round(100 * s)}%`).join(' · ');
+  $('normal').innerHTML = `<dl>
+      <dt>Apps</dt><dd>${top || '–'}</dd>
+      <dt>Busy hours</dt><dd>${base.busy_hours.length ? base.busy_hours.map(esc).join(', ') : '–'}</dd>
+      <dt>Devices</dt><dd>${fmtN(base.devices)} reporting · ${fmtN(base.apps)} apps seen</dd>
+    </dl>
+    ${base.expected.length ? `<h2>Expected</h2>${base.expected.slice(0, 8).map((e) => `<div class="exp"><span title="${esc(e.key)}">${esc(e.title)}</span><button class="btn small" data-unexpect="${esc(e.key)}">undo</button></div>`).join('')}` : ''}`;
+  for (const b of $('normal').querySelectorAll('[data-unexpect]')) b.onclick = () => expectFinding(b.dataset.unexpect, '', false);
+}
+async function expectFinding(key, title, expected) {
+  await fetch('/api/findings/expect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, title, expected }) });
+  await pollSlow();
+}
+
 // ---- data -------------------------------------------------------------------------------------
 const optional = (url) => fetch(url).then((r) => (r.ok ? r.json() : null)).catch(() => null);
 async function poll() {
@@ -260,11 +250,12 @@ async function poll() {
 }
 async function pollSlow() {
   const q = `since=${encodeURIComponent(state.win)}`, p = PRIOR[state.win];
-  [state.devices, state.sites, state.devices2, state.sites2] = await Promise.all([
+  [state.devices, state.sites, state.devices2, state.sites2, state.findings] = await Promise.all([
     optional(`/api/devices?${q}`), optional(`/api/sites?${q}`),
     p ? optional(`/api/devices?since=${p}`) : null, p ? optional(`/api/sites?since=${p}`) : null,
+    optional(`/api/findings?${q}`),
   ]);
-  render();
+  render(); renderFindings();
 }
 nm.segment($('window'), state.win, (w) => { state.win = w; render(); pollSlow(); });
 poll(); pollSlow();

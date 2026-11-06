@@ -41,9 +41,14 @@ Output is a table in a terminal and JSON when piped. Queries are read-only and c
 `data/netmap.sqlite` with `bun:sqlite`, and exposes `/api/data`, `/api/stream` and `/api/reset`
 plus the device, site and trace APIs below. `netlog record` does the recording.
 
-Pages: `/` is the overview (opens per minute stacked by app, destinations, LAN devices, tracker share,
-sites visited, each with its change against the prior window once the data reaches back that far, a
-mini world map, the live feed, and the top sites, devices, apps and networks for the chosen window);
+Pages: `/` is the overview: what changed against this network's own baseline, as a short list of
+findings with evidence and an *Expect* button (an app reaching a company or tracker it never has, a
+device or app far busier in an hour than its norm for that hour, a site pulling in a new third party,
+a process making its first connection, the recorder or pktap being down), a what's-normal panel
+(top apps, busy hours, devices, what you marked expected), a compact strip of counts with their change
+against the prior window, opens per minute by app, a mini world map and the live feed. Findings need a
+day of history before they fire; `GET /api/findings?since=24h`, `POST /api/findings/expect
+{"key", "title", "expected"}`. Expected keys live in netlog's `meta` table;
 `/map` is the full world map; `/devices` and `/sites` are below. All four share `static/app.css` and
 `static/app.js` (top nav, light/dark theme that follows the system with a toggle, sparklines, tables).
 The old `/#trace=IP` links redirect to `/map#trace=IP`.
