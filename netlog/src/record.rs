@@ -135,6 +135,19 @@ fn poll_lsof(res: &mut apps::Resolver) -> Result<(HashSet<Conn>, PortOwners, Has
     Ok((conns, owners, pids))
 }
 
+/// A 16-char kernel process name -> the full executable name it was cut from, when exactly one
+/// known process matches; otherwise the name as given.
+fn expand_comm(comm: &str, known: &HashSet<String>) -> String {
+    if comm.len() < 16 {
+        return comm.to_string();
+    }
+    let mut matches = known.iter().filter(|k| k.starts_with(comm) && !k.contains(" ["));
+    match (matches.next(), matches.next()) {
+        (Some(full), None) => full.clone(),
+        _ => comm.to_string(),
+    }
+}
+
 /// Running as root (for pktap) must not leave the database owned by root: the viewer, run by the
 /// user, writes names, pins and browser requests to it. Hand the files to the data dir's owner.
 fn give_db_to_owner(db: &Path) {
@@ -349,7 +362,9 @@ impl State {
         let info = o.epid.and_then(|e| self.apps.for_pid(e)).or_else(|| self.apps.for_pid(o.pid));
         let process = match &info {
             Some(i) => self.apps.tagged_name(&i.process, pid),
-            None => o.comm.clone(), // exited already; the truncated kernel name is still a name
+            // Exited already. The kernel name is cut at 16 chars ("Google Chrome He"); if exactly one
+            // app we have seen starts with it, that is the name.
+            None => expand_comm(&o.comm, &self.apps_known),
         };
         self.owners.insert((o.proto, o.local_port), (Resolved { process, info, via }, now));
     }
@@ -476,6 +491,15 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn truncated_names() {
+        let known: HashSet<String> = ["Google Chrome Helper (Aperitif)", "curl"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(expand_comm("Google Chrome He", &known), "Google Chrome Helper (Aperitif)");
+        assert_eq!(expand_comm("mDNSResponder", &known), "mDNSResponder");
+        let two: HashSet<String> = ["Google Chrome Helper (Aperitif)", "Google Chrome Helper"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(expand_comm("Google Chrome He", &two), "Google Chrome He"); // ambiguous: leave it
+    }
 
     #[test]
     fn endpoints() {
