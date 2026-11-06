@@ -228,6 +228,12 @@ svg.spark rect.now { fill: var(--text); }
 .leaflet-tooltip { background: var(--panel); color: var(--text); border-color: var(--line); }
 .leaflet-tooltip-top:before { border-top-color: var(--line); }
 
+/* ---- choropleth ------------------------------------------------------------------------- */
+.leaflet-countries-pane path { cursor: default; }
+.choro { display: flex; align-items: center; gap: 6px; color: var(--dim); font-size: 11px; margin-top: 10px; }
+.choro i { flex: 1; height: 8px; border-radius: 4px; max-width: 120px; }
+.choro-tip { font-variant-numeric: tabular-nums; }
+
 /* ---- heatmap: weekday x hour, one hue light -> dark ------------------------------------- */
 .heat { display: grid; grid-template-columns: 34px 1fr; gap: 4px 8px; max-width: 760px; margin-top: 6px; }
 .heat .d { color: var(--dim); font-size: 11px; line-height: 14px; text-align: right; }

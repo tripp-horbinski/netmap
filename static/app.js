@@ -81,6 +81,32 @@ window.nm = (() => {
     return live;
   }
 
+  // ---- choropleth helpers ---------------------------------------------------------------
+  // DB-IP country names that differ from Natural Earth's (110m) feature names. Places with no polygon at
+  // this scale (Hong Kong, Singapore, Bahrain) stay unshaded; their dots still draw.
+  const COUNTRY_ALIAS = {
+    'United States': 'United States of America', 'The Netherlands': 'Netherlands',
+    'Czech Republic': 'Czechia', 'Russian Federation': 'Russia', 'Korea, Republic of': 'South Korea', 'Republic of Korea': 'South Korea',
+    "Korea, Democratic People's Republic of": 'North Korea', 'Viet Nam': 'Vietnam', 'Bosnia and Herzegovina': 'Bosnia and Herz.',
+    'Dominican Republic': 'Dominican Rep.', 'Democratic Republic of the Congo': 'Dem. Rep. Congo', 'Congo, The Democratic Republic of the': 'Dem. Rep. Congo',
+    'Republic of the Congo': 'Congo', "Cote d'Ivoire": "Côte d'Ivoire", 'Ivory Coast': "Côte d'Ivoire", "Lao People's Democratic Republic": 'Laos',
+    'North Macedonia': 'Macedonia', 'Syrian Arab Republic': 'Syria', 'Iran, Islamic Republic of': 'Iran', 'Taiwan, Province of China': 'Taiwan',
+    'Tanzania, United Republic of': 'Tanzania', 'Moldova, Republic of': 'Moldova', 'Central African Republic': 'Central African Rep.',
+    'South Sudan': 'S. Sudan', 'Equatorial Guinea': 'Eq. Guinea', 'Western Sahara': 'W. Sahara', 'Solomon Islands': 'Solomon Is.',
+    'Falkland Islands (Malvinas)': 'Falkland Is.', 'Eswatini': 'eSwatini', 'Brunei Darussalam': 'Brunei', 'Palestine, State of': 'Palestine',
+    'Bolivia, Plurinational State of': 'Bolivia', 'Venezuela, Bolivarian Republic of': 'Venezuela', 'Türkiye': 'Turkey', 'Turkiye': 'Turkey',
+    'Somaliland': 'Somalia', 'Timor-Leste': 'Timor-Leste', 'Myanmar': 'Myanmar', 'Northern Cyprus': 'N. Cyprus',
+  };
+  const countryKey = (name) => (name ? COUNTRY_ALIAS[name] ?? name.replace(/^The /, '') : null);
+  const hex = (h) => { const m = /^#?([0-9a-f]{6})$/i.exec(h.trim()); return m ? [0, 2, 4].map((i) => parseInt(m[1].slice(i, i + 2), 16)) : null; };
+  /** Mix two hex colors: t = 0 gives a, t = 1 gives b. */
+  function mix(a, b, t) {
+    const A = hex(a), B = hex(b); if (!A || !B) return b;
+    return '#' + A.map((x, i) => Math.round(x + (B[i] - x) * t).toString(16).padStart(2, '0')).join('');
+  }
+  /** Sequential fill for a country with n of max: the land color stepped toward the accent, one hue. */
+  const choroFill = (n, max) => (n ? mix(token('--map-land'), token('--accent'), 0.15 + 0.7 * Math.sqrt(n / max)) : token('--map-land'));
+
   // ---- marks ---------------------------------------------------------------------------
   /** Bar sparkline over equal time bins; last bin (now) in the text ink. One <title> per bar. */
   function spark(bins, win, { cls = '', label = 'lookups' } = {}) {
@@ -119,5 +145,5 @@ window.nm = (() => {
   }
   const WINDOW_SECONDS = { '1h': 3600, '24h': 86400, '7d': 604800, all: Infinity };
 
-  return { esc, fmtN, compact, ago, when, ms, nav, stream, live, perMinute, spark, binTimes, rows, bars, segment, color, token, isDark, WINDOW_SECONDS };
+  return { esc, fmtN, compact, ago, when, ms, nav, stream, live, perMinute, spark, binTimes, rows, bars, segment, color, token, isDark, WINDOW_SECONDS, countryKey, mix, choroFill };
 })();

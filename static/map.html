@@ -47,6 +47,7 @@
     <div class="stat"><b id="s-proc">0</b><small>apps</small></div>
     <div class="stat"><b id="s-live">0</b><small>live now</small></div>
   </div>
+  <div class="choro" id="choro" style="display:none"><span>1</span><i></i><span id="choro-max"></span><span>destinations by country</span></div>
   <div class="seg wide" id="window">
     <button data-w="live">Live</button><button data-w="900">15m</button>
     <button data-w="3600">1h</button><button data-w="all" class="on">All</button>
@@ -127,8 +128,28 @@ fetch('vendor/countries-110m.json').then(r => r.json()).then(topo => {
     const polys = f.geometry.type === 'Polygon' ? [f.geometry.coordinates] : f.geometry.coordinates;
     polys.forEach(p => p.forEach(unwrap));
   }
-  countries = L.geoJSON(world, { pane: 'countries', interactive: false, style: landStyle() }).addTo(map);
+  countries = L.geoJSON(world, { pane: 'countries', style: landStyle(),
+    onEachFeature: (f, l) => l.bindTooltip('', { sticky: true, direction: 'top', className: 'choro-tip' }) }).addTo(map);
+  render();
 });
+// Shade each country by how many destinations in the window sit inside it: one hue, land -> accent.
+function shadeCountries(conns) {
+  if (!countries) return;
+  const ips = new Map();
+  for (const c of conns) { const k = nm.countryKey(c.country); if (k) (ips.get(k) ?? ips.set(k, new Set()).get(k)).add(c.ip); }
+  const max = Math.max(1, ...[...ips.values()].map((s) => s.size));
+  countries.eachLayer((l) => {
+    const n = ips.get(l.feature.properties.name)?.size ?? 0;
+    l.setStyle({ ...landStyle(), fillColor: nm.choroFill(n, max) });
+    l.setTooltipContent(n ? `${esc(l.feature.properties.name)} · ${n} destination${n === 1 ? '' : 's'}` : '');
+    l.options.interactive = n > 0;
+    l.getElement()?.classList.toggle('leaflet-interactive', n > 0);
+  });
+  const legend = document.getElementById('choro');
+  legend.style.display = ips.size ? '' : 'none';
+  legend.querySelector('i').style.background = `linear-gradient(90deg, ${nm.choroFill(1, max)}, ${nm.choroFill(max, max)})`;
+  document.getElementById('choro-max').textContent = max;
+}
 let countries = null;
 const landStyle = () => ({ color: token('--map-border'), weight: 0.7, fillColor: token('--map-land'), fillOpacity: 1 });
 window.addEventListener('nm:theme', () => {
@@ -202,6 +223,7 @@ function render() {
       .addTo(map).bindTooltip(d.home.label);
   }
 
+  shadeCountries(conns);
   renderSidebar(inWin, conns, unknown, isLive, d.now);
 }
 

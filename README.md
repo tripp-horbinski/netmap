@@ -82,6 +82,10 @@ With no site selected the page shows the dependency graph: the sites with the bi
 footprint on the left, the companies serving those hosts on the right, one ribbon per pair, hover for
 the host names, a table view behind the *Table* button. `GET /api/sites/graph?since=24h`.
 
+Countries on the map are shaded by how many destinations in the window sit inside them (one hue,
+lighter to darker, legend in the sidebar, hover a shaded country for the count). The overview's mini
+map shades the same way.
+
 **Route traces** on the map: the *route* button in any destination popup runs the system
 `traceroute` in ICMP mode (setuid on macOS, so no sudo; UDP probes die at AT&T) and draws the path
 through every hop that geolocates, with the full hop list in the sidebar. Results cache for six

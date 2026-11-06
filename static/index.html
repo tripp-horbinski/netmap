@@ -75,7 +75,15 @@ fetch('vendor/countries-110m.json').then((r) => r.json()).then((topo) => {
   for (const f of world.features) (f.geometry.type === 'Polygon' ? [f.geometry.coordinates] : f.geometry.coordinates).forEach((p) => p.forEach(unwrap));
   map.createPane('countries').style.zIndex = 200;
   countries = L.geoJSON(world, { pane: 'countries', interactive: false, style: landStyle() }).addTo(map);
+  render();
 });
+function shadeCountries(conns) {
+  if (!countries) return;
+  const ips = new Map();
+  for (const c of conns) { const k = nm.countryKey(c.country); if (k) (ips.get(k) ?? ips.set(k, new Set()).get(k)).add(c.ip); }
+  const max = Math.max(1, ...[...ips.values()].map((s) => s.size));
+  countries.eachLayer((l) => l.setStyle({ ...landStyle(), fillColor: nm.choroFill(ips.get(l.feature.properties.name)?.size ?? 0, max) }));
+}
 window.addEventListener('nm:theme', () => { countries?.setStyle(landStyle()); homeMarker?.setStyle({ color: token('--panel'), fillColor: token('--accent') }); render(); });
 
 const layers = new Map();
@@ -127,6 +135,7 @@ function render() {
       ? tile('/sites', 'Sites visited', fmtN(sites.length), `${compact(sites.reduce((n, s) => n + s.loads, 0))} loads · ${fmtN(sites.filter((s) => s.trackers).length)} with trackers`)
       : tile('/sites', 'Sites visited', '–', 'needs the Bun viewer'));
 
+  shadeCountries(conns);
   // mini map: group by place
   const groups = new Map();
   for (const c of conns) {
