@@ -15,7 +15,7 @@ if (/^#trace=/.test(location.hash)) location.replace('/map' + location.hash);</s
 </head>
 <body>
 <header id="nav"></header>
-<div class="page">
+<div class="page narrow">
   <div class="toolbar">
     <div><h1>Overview</h1><div class="sub" id="home">What changed on this network, against its own baseline</div></div>
     <div class="grow"></div>
@@ -27,18 +27,12 @@ if (/^#trace=/.test(location.hash)) location.replace('/map' + location.hash);</s
   <div class="status" id="status"><span class="big">Loading…</span></div>
   <div class="findings" id="findings"></div>
 
-  <div class="grid main" style="grid-template-columns: minmax(260px, 1fr) minmax(0, 2.4fr); align-items: start">
-    <div class="card normal"><h2>What's normal <span class="muted" id="base-days"></span></h2><div id="normal" class="muted">Loading…</div></div>
-    <div>
-      <div class="strip" id="tiles"></div>
-      <div class="card hero-card" style="margin-top:10px"><div class="hero" style="gap:8px"><span class="value" id="h-rate" style="font-size:28px">0</span><span class="what">opens in the last minute</span><span id="h-sub"></span></div><div id="h-spark"></div><div class="axis"><span>15 minutes ago</span><span>by app · now</span></div></div>
-    </div>
-  </div>
+  <div class="normal" id="normal"></div>
 
-  <div class="grid main">
-    <div class="card"><h2>Where it goes <a href="/map">open the map →</a></h2><div id="mini"></div></div>
-    <div class="card"><h2>Live <span class="muted" id="rate"></span></h2><ul class="list feed" id="live"><li class="muted">Waiting for new connections…</li></ul></div>
-  </div>
+  <div class="strip" id="tiles"></div>
+
+  <div class="card"><h2>Where it goes <a href="/map">open the map →</a></h2><div id="mini"></div></div>
+  <div class="card"><h2>Live <span class="muted" id="rate"></span></h2><ul class="list feed" id="live"><li class="muted">Waiting for new connections…</li></ul></div>
   <p class="note">Detail lives on the other pages: <a href="/map">map</a> for apps and destinations, <a href="/devices">devices</a> for the LAN, <a href="/sites">sites</a> for what each site pulls in.</p>
 </div>
 
@@ -47,7 +41,7 @@ const { esc, fmtN, compact, ago, when, spark, binTimes, bars, color, token, stac
 // The window of the same length just before the current one, for the deltas on the tiles.
 const PRIOR = { '1h': '2h', '24h': '48h', '7d': '14d' };
 const $ = (id) => document.getElementById(id);
-const state = { win: '24h', data: null, devices: null, sites: null, devices2: null, sites2: null, findings: null };
+const state = { win: '24h', data: null, devices: null, sites: null, devices2: null, sites2: null, findings: null, hero: { lastMin: 0, prevMin: 0 }, heroSpark: '' };
 nm.nav('/');
 
 // ---- mini map: countries + one dot per place, no controls; click goes to the full map --------
@@ -104,15 +98,14 @@ function render() {
   const recent = d.connections.filter((c) => d.now - c.first_seen < 900);
   const lastMin = recent.filter((c) => d.now - c.first_seen < 60).length;
   const prevMin = recent.filter((c) => d.now - c.first_seen >= 60 && d.now - c.first_seen < 120).length;
-  $('h-rate').textContent = fmtN(lastMin);
-  $('h-sub').innerHTML = delta(lastMin, prevMin, 'minute');
+  state.hero = { lastMin, prevMin };
   const perApp = new Map();
   for (const c of recent) (perApp.get(c.process) ?? perApp.set(c.process, []).get(c.process)).push(c.first_seen);
   const ranked = [...perApp].sort((a, b) => b[1].length - a[1].length);
   const topApps = ranked.slice(0, 4), rest = ranked.slice(4).flatMap(([, ts]) => ts);
   const series = topApps.map(([name, ts]) => ({ name, color: color(name), ...binTimes(ts, 900, 30) }));
   if (rest.length) series.push({ name: 'Other', color: token('--line-2'), ...binTimes(rest, 900, 30) });
-  $('h-spark').innerHTML = series.length ? stackedSpark(series.map((s) => ({ name: s.name, bins: s.bins, color: s.color })), series[0].window) : '<div class="muted">No opens in the last 15 minutes.</div>';
+  state.heroSpark = series.length ? stackedSpark(series.map((s) => ({ name: s.name, bins: s.bins, color: s.color })), series[0].window) : '';
 
   // tiles
   const ips = new Set(conns.map((c) => c.ip)), apps = new Set(conns.map((c) => c.process));
@@ -134,6 +127,7 @@ function render() {
   const tile = (href, label, value, sub, extra = '', cls = '') =>
     `<a class="tile" href="${href}"><div class="label">${label}</div><div class="value ${cls}">${value}</div><div class="sub muted">${sub}</div>${extra}</a>`;
   $('tiles').innerHTML =
+    tile('/map', 'Opens per minute', fmtN(state.hero.lastMin), delta(state.hero.lastMin, state.hero.prevMin, 'minute') || 'last 15 min by app', state.heroSpark) +
     tile('/map', 'Destinations', compact(ips.size), `${fmtN(liveNow)} live now · ${fmtN(apps.size)} app${apps.size === 1 ? '' : 's'}`, delta(ips.size, prevIps, state.win)) +
     (state.devices
       ? tile('/devices', 'LAN devices', fmtN(devs.length), `${compact(lookups)} DNS lookups`, sumBins ? spark(sumBins, state.devices.window) : '')
@@ -227,16 +221,12 @@ function renderFindings() {
     </div>`).join('');
   for (const b of $('findings').querySelectorAll('[data-expect]')) b.onclick = () => expectFinding(b.dataset.expect, b.dataset.title, true);
   const base = r.baseline;
-  $('base-days').textContent = base.days >= 1 ? `· ${Math.round(base.days)} day${Math.round(base.days) === 1 ? '' : 's'} of history` : '· building';
   const merged = new Map(); // raw helpers alias to one product: sum their shares
   for (const a of base.top_apps) { const n = nm.appName(a.app); merged.set(n, (merged.get(n) ?? 0) + a.share); }
-  const top = [...merged].sort((a, b) => b[1] - a[1]).map(([n, s]) => `${esc(n)} ${Math.round(100 * s)}%`).join(' · ');
-  $('normal').innerHTML = `<dl>
-      <dt>Apps</dt><dd>${top || '–'}</dd>
-      <dt>Busy hours</dt><dd>${base.busy_hours.length ? base.busy_hours.map(esc).join(', ') : '–'}</dd>
-      <dt>Devices</dt><dd>${fmtN(base.devices)} reporting · ${fmtN(base.apps)} apps seen</dd>
-    </dl>
-    ${base.expected.length ? `<h2>Expected</h2>${base.expected.slice(0, 8).map((e) => `<div class="exp"><span title="${esc(e.key)}">${esc(e.title)}</span><button class="btn small" data-unexpect="${esc(e.key)}">undo</button></div>`).join('')}` : ''}`;
+  const top = [...merged].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([n, s]) => `${esc(n)} ${Math.round(100 * s)}%`).join(', ');
+  const history = base.days >= 1 ? `${Math.round(base.days)} day${Math.round(base.days) === 1 ? '' : 's'} of history` : 'less than a day of history';
+  $('normal').innerHTML = `<span class="k">Normal here</span> ${top || 'no apps yet'} · busy ${base.busy_hours.length ? base.busy_hours.map(esc).join(', ') : '–'} · ${fmtN(base.devices)} device${base.devices === 1 ? '' : 's'} · ${fmtN(base.apps)} apps · ${history}` +
+    (base.expected.length ? `<div class="chips">${base.expected.slice(0, 8).map((e) => `<span class="chip" title="${esc(e.key)}">${esc(e.title)} <button data-unexpect="${esc(e.key)}" title="Report this again">×</button></span>`).join('')}</div>` : '');
   for (const b of $('normal').querySelectorAll('[data-unexpect]')) b.onclick = () => expectFinding(b.dataset.unexpect, '', false);
 }
 async function expectFinding(key, title, expected) {

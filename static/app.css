@@ -288,10 +288,20 @@ svg.spark rect.now { fill: var(--text); }
 .finding .d a { margin-right: 10px; }
 .finding .act { display: flex; gap: 6px; align-items: center; white-space: nowrap; }
 .finding .when { color: var(--dim); font-size: 11px; font-variant-numeric: tabular-nums; }
-.normal dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; font-size: 12px; }
-.normal dt { color: var(--dim); } .normal dd { margin: 0; }
-.normal .exp { display: flex; justify-content: space-between; gap: 8px; padding: 3px 0; border-top: 1px solid var(--line); font-size: 12px; }
-.strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.page.narrow > * { max-width: 920px; }
+.normal { color: var(--dim); font-size: 12px; margin: 16px auto 10px; }
+.normal .k { color: var(--text); font-weight: 600; text-transform: uppercase; letter-spacing: .06em; font-size: 11px; margin-right: 6px; }
+.normal .chips { margin-top: 6px; }
+.chip { display: inline-flex; align-items: center; gap: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 99px; padding: 1px 4px 1px 9px; color: var(--text); }
+.chip button { background: none; border: 0; color: var(--dim); cursor: pointer; font: inherit; padding: 0 4px; }
+.chip button:hover { color: var(--text); }
+.findings:empty + .normal { margin-top: 0; }
+.strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 12px; }
+.page.narrow .card { margin-top: 12px; }
+.page.narrow #mini { height: 300px; }
+.page.narrow .feed li:nth-child(n+9) { display: none; }
 .strip .tile { padding: 10px 12px; }
 .strip .tile .value { font-size: 22px; }
 .strip .tile svg.spark { height: 26px; margin-top: 6px; }
+
+.strip .tile .chips { display: none; }
