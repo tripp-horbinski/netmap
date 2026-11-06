@@ -7,7 +7,8 @@ A live dashboard of where this Mac and the devices on the LAN are talking to.
 - Geolocates IPs **offline** with the free DB-IP Lite databases, so your IPs aren't sent to a lookup service.
 - Keeps history in `data/netmap.sqlite` so it builds up over time.
 - The viewer (Bun) serves an overview, a world map, a LAN device dashboard and site dependency traces
-  at http://127.0.0.1:8765.
+  at http://127.0.0.1:8765. The pages make no outside requests: Leaflet 1.9.4 and the Natural Earth
+  country shapes are vendored in `static/vendor`.
 
 ```sh
 ./setup.sh                                   # DB-IP Lite (~150 MB), cargo build, bun build
