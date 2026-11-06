@@ -307,7 +307,7 @@ function renderLive() {
   if (!live.length) return;
   document.getElementById('live').innerHTML = live.slice(0, 8).map(e =>
     `<li data-id="${e.id}"${e === live[0] ? ' class="new"' : ''}><span class="dot" style="background:${color(e.app)}"></span>
-       <span class="name"><b>${esc(e.app)}</b>${e.site ? ` · ${esc(e.site)}` : ''} → ${esc(e.host || e.org || e.ip)}</span>
+       <span class="name"><b>${esc(e.app)}</b>${e.via ? ` <span class="muted">via ${esc(e.via)}</span>` : ''}${e.site ? ` · ${esc(e.site)}` : ''} → ${esc(e.host || e.org || e.ip)}</span>
        <span class="t">${ago(Math.max(0, now - e.ts))}</span></li>`).join('');
 }
 function flash(e) {

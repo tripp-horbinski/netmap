@@ -11,7 +11,10 @@ export interface Connection {
 }
 
 export interface OpenEvent {
-  id: number; ts: number; app: string; ip: string; port: number; proto: string;
+  id: number; ts: number; app: string;
+  /** The app the process was launched from (a terminal, an IDE), when netlog could tell. */
+  via: string | null;
+  ip: string; port: number; proto: string;
   host: string | null; org: string | null; city: string | null; country: string | null;
   lat: number | null; lon: number | null;
 }
@@ -33,8 +36,10 @@ export class NetmapDb {
       `SELECT ip, name FROM ip_name WHERE ip IN (SELECT ip FROM conn)
        ORDER BY ip, source='sni' DESC, last_seen DESC`);
     this.maxEventQ = this.db.query<{ id: number }, []>("SELECT COALESCE(MAX(id), 0) AS id FROM events");
+    // `via` arrived with a later netlog; read NULL until the recorder has migrated the table.
+    const hasVia = this.db.query<{ name: string }, []>("PRAGMA table_info(events)").all().some((c) => c.name === "via");
     this.eventsQ = this.db.query<OpenEvent, [number]>(
-      `SELECT e.id, e.ts, e.process AS app, e.ip, e.port, e.proto,
+      `SELECT e.id, e.ts, e.process AS app, ${hasVia ? "e.via" : "NULL AS via"}, e.ip, e.port, e.proto,
               (SELECT n.name FROM ip_name n WHERE n.ip = e.ip
                  ORDER BY n.source = 'sni' DESC, n.last_seen DESC LIMIT 1) AS host,
               i.org, i.city, i.country, i.lat, i.lon

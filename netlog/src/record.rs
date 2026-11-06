@@ -338,15 +338,23 @@ impl State {
 
     /// The process name for an open: pktap's owner (resolved through its pid to the executable
     /// name lsof would report, preferring the app a system proxy acted for), else lsof's.
-    fn attribute(&mut self, o: &Open, lsof: &PortOwners) -> (String, Option<apps::AppInfo>) {
+    fn attribute(&mut self, o: &Open, lsof: &PortOwners, pids: &HashMap<String, i32>) -> (String, Option<apps::AppInfo>, Option<String>) {
         if let Some((owner, _)) = self.owners.get(&(o.proto, o.local_port)).cloned() {
+            let pid = owner.epid.unwrap_or(owner.pid);
+            let via = self.apps.via(pid);
             let info = owner.epid.and_then(|e| self.apps.for_pid(e)).or_else(|| self.apps.for_pid(owner.pid));
             return match info {
-                Some(i) => (i.process.clone(), Some(i)),
-                None => (owner.comm, None), // exited already; the truncated kernel name is still a name
+                Some(i) => (i.process.clone(), Some(i), via),
+                None => (owner.comm, None, via), // exited already; the truncated kernel name is still a name
             };
         }
-        (lsof.get(&(o.proto.to_string(), o.local_port)).cloned().unwrap_or_else(|| "(unknown)".into()), None)
+        match lsof.get(&(o.proto.to_string(), o.local_port)).cloned() {
+            Some(name) => {
+                let via = pids.get(&name).and_then(|p| self.apps.via(*p));
+                (name, None, via)
+            }
+            None => ("(unknown)".into(), None, None),
+        }
     }
 
     fn accept_open(&mut self, o: &Open) -> bool {
@@ -367,11 +375,11 @@ impl State {
         let now = db::now();
         let (live, owners, pids) = if full { poll_lsof().context("running lsof")? } else { Default::default() };
         // Attribute opens first: it borrows the resolver, which the rest of the tick does not.
-        let attributed: Vec<(Open, String, Option<apps::AppInfo>)> = {
+        let attributed: Vec<(Open, String, Option<apps::AppInfo>, Option<String>)> = {
             let opens: Vec<Open> = self.opens.drain(..).collect();
-            opens.into_iter().map(|o| { let (p, i) = self.attribute(&o, &owners); (o, p, i) }).collect()
+            opens.into_iter().map(|o| { let (p, i, v) = self.attribute(&o, &owners, &pids); (o, p, i, v) }).collect()
         };
-        let mut new_apps: Vec<apps::AppInfo> = attributed.iter().filter_map(|(_, _, i)| i.clone()).collect();
+        let mut new_apps: Vec<apps::AppInfo> = attributed.iter().filter_map(|(_, _, i, _)| i.clone()).collect();
         for (name, pid) in &pids {
             if !self.apps_known.contains(name) {
                 if let Some(i) = self.apps.for_pid(*pid) {
@@ -413,11 +421,11 @@ impl State {
             )?;
             ensure_ip(&tx, &c.ip)?;
         }
-        for (o, process, _) in attributed {
+        for (o, process, _, via) in attributed {
             let ip = o.ip.to_string();
             tx.execute(
-                "INSERT INTO events (ts, process, ip, port, proto) VALUES (?1, ?2, ?3, ?4, ?5)",
-                (o.ts, &process, &ip, o.port, o.proto),
+                "INSERT INTO events (ts, process, ip, port, proto, via) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                (o.ts, &process, &ip, o.port, o.proto, &via),
             )?;
             // Make sure short-lived connections still show up in `conn` (and on the map).
             tx.execute(

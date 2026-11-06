@@ -222,7 +222,7 @@ function renderLive() {
   const n = nm.perMinute();
   $('rate').textContent = ev.length ? `· ${n}${n >= 60 ? '+' : ''} in the last minute` : '';
   if (!ev.length) return;
-  $('live').innerHTML = ev.map((e) => `<li data-id="${e.id}"><span class="dot" style="background:${color(e.app)}"></span><span class="name"><b>${esc(e.app)}</b>${e.site ? ` · ${esc(e.site)}` : ''} → ${esc(e.host || e.org || e.ip)}</span><span class="t">${ago(e.ts)}</span></li>`).join('');
+  $('live').innerHTML = ev.map((e) => `<li data-id="${e.id}"><span class="dot" style="background:${color(e.app)}"></span><span class="name"><b>${esc(e.app)}</b>${e.via ? ` <span class="muted">via ${esc(e.via)}</span>` : ''}${e.site ? ` · ${esc(e.site)}` : ''} → ${esc(e.host || e.org || e.ip)}</span><span class="t">${ago(e.ts)}</span></li>`).join('');
   $('live').firstElementChild.classList.add('new');
 }
 let flashing = 0;

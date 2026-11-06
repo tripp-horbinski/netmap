@@ -58,7 +58,7 @@ FROM conn c LEFT JOIN ip_info i USING (ip);
 
 DROP VIEW IF EXISTS opens;
 CREATE VIEW opens AS
-SELECT e.id, e.ts, e.process AS app, e.ip, e.port, e.proto,
+SELECT e.id, e.ts, e.process AS app, e.via, e.ip, e.port, e.proto,
   (SELECT n.name FROM ip_name n WHERE n.ip = e.ip
      ORDER BY n.source = 'sni' DESC, n.last_seen DESC LIMIT 1) AS host,
   i.org, i.city, i.region, i.country, i.lat, i.lon
@@ -131,12 +131,27 @@ pub fn open(path: &Path, read_only: bool) -> Result<Connection> {
     conn.busy_timeout(Duration::from_secs(5))?;
     conn.pragma_update(None, "journal_mode", "WAL")?;
     conn.execute_batch(TABLES)?;
+    migrate(&conn)?;
     conn.execute_batch(VIEWS)?;
     register_functions(&conn)?;
     if read_only {
         conn.pragma_update(None, "query_only", "ON")?;
     }
     Ok(conn)
+}
+
+/// Columns added after the first release; CREATE TABLE IF NOT EXISTS won't add them.
+fn migrate(conn: &Connection) -> Result<()> {
+    let has = |table: &str, col: &str| -> Result<bool> {
+        let mut st = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+        let cols: Vec<String> = st.query_map([], |r| r.get::<_, String>(1))?.collect::<rusqlite::Result<_>>()?;
+        Ok(cols.iter().any(|c| c == col))
+    };
+    if !has("events", "via")? {
+        // The app the process was launched from (a terminal, an IDE), when it has one.
+        conn.execute_batch("ALTER TABLE events ADD COLUMN via TEXT")?;
+    }
+    Ok(())
 }
 
 fn register_functions(conn: &Connection) -> Result<()> {

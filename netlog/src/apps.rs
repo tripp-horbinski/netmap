@@ -9,6 +9,23 @@ use std::path::Path;
 
 unsafe extern "C" {
     fn proc_pidpath(pid: i32, buffer: *mut c_char, buffersize: u32) -> i32;
+    fn proc_pidinfo(pid: i32, flavor: i32, arg: u64, buffer: *mut u8, buffersize: i32) -> i32;
+}
+
+/// libproc's PROC_PIDTBSDINFO: a 136-byte `proc_bsdinfo` whose parent pid sits at offset 16.
+const PROC_PIDTBSDINFO: i32 = 3;
+const BSDINFO_SIZE: i32 = 136;
+
+/// Parent process id, None once the process is gone. libproc refuses other users' processes
+/// unless we are root (the terminal's `login` is root-owned), so fall back to `ps`, which may ask.
+pub fn parent_pid(pid: i32) -> Option<i32> {
+    let mut buf = [0u8; BSDINFO_SIZE as usize];
+    let n = unsafe { proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, buf.as_mut_ptr(), BSDINFO_SIZE) };
+    if n >= 20 {
+        return Some(i32::from_ne_bytes([buf[16], buf[17], buf[18], buf[19]]));
+    }
+    let out = std::process::Command::new("ps").args(["-o", "ppid=", "-p", &pid.to_string()]).output().ok()?;
+    String::from_utf8_lossy(&out.stdout).trim().parse().ok()
 }
 
 /// Full path of a running process's executable (libproc), None if it has exited.
@@ -66,12 +83,47 @@ pub fn describe(path: &str) -> AppInfo {
 #[derive(Default)]
 pub struct Resolver {
     by_path: HashMap<String, AppInfo>,
+    /// pid -> the app it was launched from (see `via`), while the process lives.
+    via_cache: HashMap<i32, Option<String>>,
 }
 
 impl Resolver {
     pub fn for_pid(&mut self, pid: i32) -> Option<AppInfo> {
         let path = exe_path(pid)?;
         Some(self.by_path.entry(path.clone()).or_insert_with(|| describe(&path)).clone())
+    }
+
+    /// The app a process was launched from: the first ancestor living in a different `.app`
+    /// bundle, so `ssh` run in a terminal reports the terminal and a Chrome helper reports
+    /// nothing (its parent is Chrome itself). None for daemons under launchd.
+    pub fn via(&mut self, pid: i32) -> Option<String> {
+        if self.via_cache.len() > 5000 {
+            self.via_cache.clear();
+        }
+        if let Some(v) = self.via_cache.get(&pid) {
+            return v.clone();
+        }
+        let own_bundle = exe_path(pid).as_deref().and_then(bundle_dir).map(str::to_string);
+        let mut cur = pid;
+        let mut found = None;
+        for _ in 0..12 {
+            let Some(parent) = parent_pid(cur) else { break };
+            if parent <= 1 || parent == cur {
+                break;
+            }
+            if let Some(path) = exe_path(parent) {
+                if let Some(dir) = bundle_dir(&path) {
+                    if own_bundle.as_deref() != Some(dir) {
+                        let info = self.by_path.entry(path.clone()).or_insert_with(|| describe(&path));
+                        found = info.name.clone().or_else(|| Some(info.process.clone()));
+                        break;
+                    }
+                }
+            }
+            cur = parent;
+        }
+        self.via_cache.insert(pid, found.clone());
+        found
     }
 }
 
@@ -94,8 +146,21 @@ mod tests {
     }
 
     #[test]
+    fn parents_resolve() {
+        let me = std::process::id() as i32;
+        let p = parent_pid(me).unwrap();
+        assert!(p > 0 && p != me);
+        assert!(parent_pid(999_999_999).is_none());
+        // Whatever launched the test binary, walking up must not panic or loop; from a terminal
+        // it names the terminal app (login is root-owned, so this exercises the ps fallback).
+        let via = Resolver::default().via(me);
+        eprintln!("via = {via:?}");
+    }
+
+    #[test]
     fn own_pid_resolves() {
         let me = exe_path(std::process::id() as i32).unwrap();
         assert!(me.ends_with("netlog") || me.contains("netlog-"), "{me}");
     }
 }
+

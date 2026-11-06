@@ -102,7 +102,10 @@ working. `--no-pktap` turns it off. Without sudo everything works as before.
 Either way, netlog now resolves each process to its app: executable path from the pid, then the
 outermost `.app` bundle's Info.plist (name, bundle id, version, Sparkle update feed), stored in an
 `apps` table and served at `GET /api/apps`. The pages show "Google Chrome" for every Chrome helper
-and `releases.zentty.org` can be read back to Zentty's update check from its feed URL.
+and `releases.zentty.org` can be read back to Zentty's update check from its feed URL. Each open
+also records `via`: the app the process was launched from, found by walking the parent chain to
+the first different `.app` bundle, so `ssh` run in a terminal shows "ssh via Zentty" in the feeds
+and `opens.via` in SQL (NULL for daemons and for processes gone before the lookup).
 
 ## Exact browser attribution (Chrome extension)
 
