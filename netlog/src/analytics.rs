@@ -526,9 +526,12 @@ pub fn schema(format: Format) {
 
 pub const GUIDE: &str = r#"# netlog guide for AI agents
 
-netlog records which servers this Mac's apps connect to (every 2s via lsof), with
-hostnames (from DNS answers and TLS SNI), owning company (ASN) and rough location.
-Everything is local SQLite; queries are read-only.
+netlog records which servers this Mac's apps connect to, with the owning process named on the
+connection's first packet (pktap, when running as root; lsof polling otherwise), hostnames
+(from DNS answers and TLS SNI), owning company (ASN) and rough location. Everything is local
+SQLite; queries are read-only. The hazel viewer (http://127.0.0.1:8765, JSON under /api/)
+adds findings against the baseline, app and site report cards, a companies rollup and the
+block list; the Claude Code skill in .claude/skills/netlog lists its endpoints.
 
 ## Scope
 Two sources. `connections`/`opens` cover THIS Mac with per-app detail. `lookups`/`devices` cover
@@ -553,9 +556,15 @@ Windows: --since 90s|15m|1h|24h|7d|all. Default 24h.
   server, which for CDNs (Cloudflare, Akamai, Fastly, Google) is shared by many sites.
 - City/country of CDN IPs is approximate; don't claim data "went to Montreal" from one row.
 - `samples` counts 2-second polls, so samples*2 ≈ seconds a connection stayed open.
-- `opens` is the real-time log: every new TCP/QUIC connection as it starts, including ones
-  too short-lived for the 2s poll. `(unknown)` app = closed before it could be attributed.
-- Short-lived connections between polls are missed, and root-owned system daemons are invisible.
+- `opens` is the real-time log: every new TCP/QUIC connection as it starts, named on its first
+  packet when pktap is on (`netlog status`), so short-lived and root-owned ones are included.
+  `(unknown)` then means no process owned the packet. `via` is the app the process was launched
+  from (a terminal, Claude Code); `closed`/`duration` are TCP lifetimes from FIN/RST.
+- Process names ending in " [headless]" or " [automated]" are browsers started by scripts or
+  Playwright, kept separate from the real browser on purpose. The `apps` table maps a process to
+  its bundle, version and update feed.
+- `netlog block` manages the resolver's block list (`lookups.blocked` names the rule that refused
+  a lookup); changes need the user's agreement.
 - Low hostname coverage (see suggest) means tracker/domain counts are lower bounds.
 - Encrypted DNS (DoT/DoH) goes around the resolver: `suggest` flags it; `lookups` undercounts
   any device doing it. On macOS, listing a public DNS server as fallback triggers this.
