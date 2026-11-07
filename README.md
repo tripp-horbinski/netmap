@@ -85,6 +85,12 @@ trackers across all loads. With the extension the trace is a Gantt: every reques
 to finish, grouped by company, colored by what the host is to the site, with a time ruler, sizes and
 status on hover, and a summary of when first-party work finished and how long trackers kept going.
 Heuristic loads only know when each host first appeared, so they draw ticks instead of bars.
+A site with exact loads also gets a report card: what a visit costs in requests and bytes, the
+split by role (first party, update, telemetry, ads, CDN, other) by request count and by bytes, who
+gets the bytes by company, request types, when the page's own work finished versus how long trackers
+ran, and the trend across visits. `GET /api/sites/SITE/card?since=24h`. Bytes come from
+Content-Length, so chunked responses count as 0.
+
 The recorder gives every TCP connection the same treatment: it captures FIN and RST as well as SYN,
 so `opens.closed` and `opens.duration` say how long each connection lived, and an app's report card
 shows its recent connections as a Gantt with the typical lifetime per host class.

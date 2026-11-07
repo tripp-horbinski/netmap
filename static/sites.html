@@ -53,7 +53,7 @@
 const { esc, fmtN, ago, ms, rows } = nm;
 const when = (ts) => nm.when(ts, true);
 const $ = (id) => document.getElementById(id);
-const state = { win: '24h', site: null, list: [], detail: null, q: '', graph: null, table: false, load: null, loadStart: null };
+const state = { win: '24h', site: null, list: [], detail: null, q: '', graph: null, table: false, load: null, loadStart: null, card: null };
 const CLASSES = [['first-party', 'first party'], ['update', 'update check'], ['telemetry', 'telemetry'], ['ads', 'ads & tracking'], ['cdn', 'CDN / cloud'], ['other', 'other']];
 const fmtBytes = (b) => (b == null ? '' : b >= 1048576 ? `${(b / 1048576).toFixed(1)} MB` : b >= 1024 ? `${Math.round(b / 1024)} KB` : `${b} B`);
 nm.nav('/sites');
@@ -82,6 +82,41 @@ function renderList() {
 }
 
 const tags = (h) => (h.first_party || h.domain === state.site ? '<span class="tag fp">first party</span>' : '') + (h.tracker ? '<span class="tag">tracker</span>' : '');
+
+// The report card: what a visit costs, by role and by company, from exact loads only.
+function reportCard(c) {
+  if (!c) return '';
+  const segbar = (get, tall) => {
+    const total = CLASSES.reduce((n, [k]) => n + get(k), 0) || 1;
+    return `<div class="segbar${tall ? ' tall' : ''}">${CLASSES.filter(([k]) => get(k)).map(([k, l]) =>
+      `<i class="c-${k}" style="width:${(100 * get(k) / total).toFixed(1)}%" title="${l}: ${tall ? fmtBytes(get(k)) : fmtN(get(k)) + ' requests'}">${tall && get(k) / total > 0.12 ? Math.round(100 * get(k) / total) + '%' : ''}</i>`).join('')}</div>`;
+  };
+  const third = c.bytes - c.by_class['first-party'].bytes;
+  const trk = c.by_class.ads.bytes + c.by_class.telemetry.bytes;
+  const clsTag = (k) => `<span class="tag cls"><i class="c-${k}"></i>${esc(CLASSES.find(([x]) => x === k)?.[1] ?? k)}</span>`;
+  return `
+    <h2>Report card <span class="muted">from ${fmtN(c.loads)} exact load${c.loads === 1 ? '' : 's'} · what a visit costs and who gets it</span></h2>
+    <div class="tiles">
+      <div class="tile"><div class="label">Per visit</div><div class="value">${fmtBytes(Math.round(c.bytes / c.loads))}</div><div class="sub muted">${fmtN(Math.round(c.requests / c.loads))} requests · ${c.span != null ? ms(c.span) : '–'}</div></div>
+      <div class="tile"><div class="label">Third party</div><div class="value">${c.bytes ? Math.round(100 * third / c.bytes) : 0}%</div><div class="sub muted">of bytes · ${fmtBytes(third)} total</div></div>
+      <div class="tile"><div class="label">Ads &amp; telemetry</div><div class="value${trk ? ' warn' : ''}">${fmtBytes(trk)}</div><div class="sub muted">${fmtN(c.by_class.ads.requests + c.by_class.telemetry.requests)} requests</div></div>
+      <div class="tile"><div class="label">Own work done at</div><div class="value">${c.fp_done != null ? ms(c.fp_done) : '–'}</div><div class="sub muted">${c.trackers_until != null ? `trackers until ${ms(c.trackers_until)}` : 'no trackers'}</div></div>
+    </div>
+    <div class="legend">${CLASSES.map(([k, l]) => `<span><i class="c-${k}"></i>${l}</span>`).join('')}</div>
+    <div class="chart"><div class="muted" style="font-size:11px;margin-bottom:3px">by requests</div>${segbar((k) => c.by_class[k].requests, false)}
+      <div class="muted" style="font-size:11px;margin:8px 0 3px">by bytes</div>${segbar((k) => c.by_class[k].bytes, true)}</div>
+    <div class="cols">
+      <div><h2>Who gets the bytes</h2>${rows(c.companies.slice(0, 12), [
+        { h: 'company', f: (r) => `<a href="/companies#${encodeURIComponent(r.org)}">${esc(r.org)}</a>` },
+        { h: 'bytes', n: true, f: (r) => fmtBytes(r.bytes) }, { h: 'reqs', n: true, f: (r) => fmtN(r.requests) },
+        { h: 'as', f: (r) => r.classes.map(clsTag).join(' ') }], 'None.')}</div>
+      <div><h2>Request types</h2>${rows(c.types, [{ h: 'type', f: (r) => esc(r.type) }, { h: 'reqs', n: true, f: (r) => fmtN(r.requests) }, { h: 'bytes', n: true, f: (r) => fmtBytes(r.bytes) }], 'None.')}</div>
+      <div><h2>Visits</h2>${rows(c.per_load.slice(0, 12), [
+        { h: 'when', f: (r) => `<span style="white-space:nowrap">${new Date(r.start * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>` }, { h: 'bytes', n: true, f: (r) => fmtBytes(r.bytes) },
+        { h: '3rd party', n: true, f: (r) => (r.bytes ? Math.round(100 * r.third_party_bytes / r.bytes) + '%' : '–') },
+        { h: 'trk', n: true, f: (r) => fmtN(r.trackers) }, { h: 'done', n: true, f: (r) => (r.fp_done != null ? ms(r.fp_done) : '–') }], 'None.')}</div>
+    </div>`;
+}
 
 // Gantt of one load: every request as a bar from start to end (a tick when the end is unknown),
 // grouped by company, colored by what the host is to the site. Heuristic loads only know when each
@@ -185,6 +220,7 @@ function renderDetail() {
       <div class="tile"><div class="label">Companies</div><div class="value">${fmtN(s.orgs)}</div></div>
       <div class="tile"><div class="label">Tracker hosts</div><div class="value${s.trackers ? ' warn' : ''}">${fmtN(s.trackers)}</div></div>
     </div>
+    ${reportCard(state.card)}
     <h2>Trace <span class="muted">${state.load && state.loadStart ? 'the load you picked' : 'the richest recent load'} · pick another below</span></h2>
     ${gantt(state.load ?? d.latest)}
     <h2>Everything it pulls in <span class="muted">across ${fmtN(s.loads)} load${s.loads === 1 ? '' : 's'}</span></h2>
@@ -241,13 +277,14 @@ async function select(site) {
 
 async function refresh() {
   const q = `since=${encodeURIComponent(state.win)}`;
-  const [list, detail, graph] = await Promise.all([
+  const [list, detail, card, graph] = await Promise.all([
     fetch(`/api/sites?${q}`).then((r) => r.json()),
     state.site ? fetch(`/api/sites/${encodeURIComponent(state.site)}?${q}`).then((r) => (r.ok ? r.json() : null)) : null,
+    state.site ? fetch(`/api/sites/${encodeURIComponent(state.site)}/card?${q}`).then((r) => (r.ok ? r.json() : null)) : null,
     state.site ? state.graph : fetch(`/api/sites/graph?${q}`).then((r) => r.json()),
     fetch('/api/browser/status').then((r) => r.json()).then(showExt).catch(() => {}),
   ]);
-  state.list = list; state.detail = detail; state.graph = graph;
+  state.list = list; state.detail = detail; state.card = card; state.graph = graph;
   renderList(); renderDetail();
 }
 

@@ -21,6 +21,7 @@ import { AppReportDb } from "./appreport";
 import { BlocksDb } from "./blocks";
 import { appName as productName } from "./appname";
 import { classifyHost } from "./classify";
+import { buildSiteCard } from "./sitecard";
 import type { Load } from "./sites";
 import { Tracer, isIp } from "./trace";
 
@@ -326,6 +327,18 @@ const server = Bun.serve({
       },
     },
     "/api/sites/graph": { GET: (req) => withWindow((w) => sites.graph(w, browsersOnly(req)))(req) },
+    "/api/sites/:site/card": {
+      GET: (req) => {
+        try {
+          const site = decodeURIComponent(req.params.site);
+          const loads = sites.loads(windowOf(req), browsersOnly(req)).filter((l) => l.site === site).map((l) => classifyLoad(l)!);
+          const card = buildSiteCard(site, loads);
+          return card ? json(card) : json({ error: "no exact loads of that site in this window" }, 404);
+        } catch (e) {
+          return json({ error: String(e instanceof Error ? e.message : e) }, 400);
+        }
+      },
+    },
     "/api/sites/:site/load/:start": {
       GET: (req) => {
         try {

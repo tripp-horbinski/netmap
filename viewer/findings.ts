@@ -47,7 +47,7 @@ const UNKNOWN_ORG = "Unknown network";
 interface OpenRow { ts: number; process: string; ip: string; org: string | null; host: string | null }
 
 export class FindingsDb {
-  private opensQ; private histQ; private firstSeenQ; private hourlyQ; private dnsHourlyQ; private appsQ; private metaQ; private setMetaQ; private minTsQ; private deviceNamesQ;
+  private opensQ; private histQ; private firstSeenQ; private hourlyQ; private dnsHourlyQ; private appsQ; private metaQ; private setMetaQ; private minTsQ; private deviceNamesQ; private dayQ;
 
   constructor(private db: Database, private sites: { loads(window: string, browsersOnly?: boolean): Load[] }) {
     const openSql = (where: string) => `
@@ -73,6 +73,9 @@ export class FindingsDb {
     this.setMetaQ = db.query<void, [string, string]>("INSERT INTO meta VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value");
     this.minTsQ = db.query<{ t: number | null }, []>("SELECT MIN(ts) AS t FROM events");
     this.deviceNamesQ = db.query<{ ip: string; name: string }, []>("SELECT ip, COALESCE(label, mac, ip) AS name FROM devices");
+    // The local calendar day of a timestamp, by SQLite's clock, so it matches the day() in the hourly
+    // queries whatever zone the JS runtime thinks it is in (bun test runs in UTC).
+    this.dayQ = db.query<{ d: string }, [number]>("SELECT date(?1, 'unixepoch', 'localtime') AS d");
   }
 
   // ---- expected ------------------------------------------------------------------------------
@@ -155,7 +158,7 @@ export class FindingsDb {
   private offHours(since: number, histStart: number, names: Map<string, string>): Finding[] {
     const out: Finding[] = [];
     const check = (rows: { who: string; day: string; hour: number; n: number }[], kindOf: (who: string) => { entity: string; href: string; what: string }) => {
-      const sinceDay = new Date(since * 1000).toLocaleDateString("sv"); // yyyy-mm-dd local, same as sqlite's date()
+      const sinceDay = this.dayQ.get(since)!.d;
       const base = new Map<string, number[]>(); // who:hour -> counts on prior days
       const days = new Map<string, Set<string>>();
       const cur = new Map<string, { hour: number; n: number; day: string }>();
