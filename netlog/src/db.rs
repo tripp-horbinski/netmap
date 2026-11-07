@@ -39,6 +39,10 @@ CREATE TABLE IF NOT EXISTS devices (
   ip TEXT PRIMARY KEY, mac TEXT, label TEXT, first_seen REAL NOT NULL, last_seen REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS conn_last_seen ON conn (last_seen);
+CREATE TABLE IF NOT EXISTS blocks (
+  pattern TEXT NOT NULL, device TEXT NOT NULL DEFAULT '*', source TEXT NOT NULL DEFAULT 'user',
+  note TEXT, created REAL NOT NULL, PRIMARY KEY (pattern, device)
+);
 CREATE TABLE IF NOT EXISTS apps (
   process TEXT PRIMARY KEY, path TEXT, bundle_id TEXT, name TEXT, version TEXT, feed_url TEXT,
   first_seen REAL NOT NULL
@@ -68,7 +72,7 @@ FROM events e LEFT JOIN ip_info i USING (ip);
 DROP VIEW IF EXISTS lookups;
 CREATE VIEW lookups AS
 SELECT d.id, d.ts, d.client, COALESCE(v.label, v.mac, d.client) AS device,
-  d.qname, d.qtype, d.rcode, d.answers, d.cached, d.ms
+  d.qname, d.qtype, d.rcode, d.answers, d.cached, d.ms, d.blocked
 FROM dns d LEFT JOIN devices v ON v.ip = d.client;
 ";
 
@@ -151,6 +155,10 @@ fn migrate(conn: &Connection) -> Result<()> {
     if !has("events", "via")? {
         // The app the process was launched from (a terminal, an IDE), when it has one.
         conn.execute_batch("ALTER TABLE events ADD COLUMN via TEXT")?;
+    }
+    if !has("dns", "blocked")? {
+        // The block pattern that refused a lookup (NULL = answered normally).
+        conn.execute_batch("ALTER TABLE dns ADD COLUMN blocked TEXT")?;
     }
     if !has("events", "lport")? {
         // Local port, to match a FIN/RST back to its open; `closed` is when that happened.

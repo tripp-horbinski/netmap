@@ -15,6 +15,8 @@ export interface Finding {
   entity: string;         // app / device / site / "recorder"
   ts: number;             // when it started in the window
   links: { label: string; href: string }[];
+  /** A domain the resolver could refuse to make this stop, when the finding is about one. */
+  block?: string;
 }
 
 export interface Baseline {
@@ -139,6 +141,7 @@ export class FindingsDb {
       const hosts = [...e.hosts].slice(0, 3).join(", ") || [...e.ips].slice(0, 3).join(", ");
       out.push({
         key: `first-contact:${app}:${what}`, kind: "first-contact", entity: app, ts: e.first,
+        block: e.tracker ? what.slice(8) : undefined,
         score: e.tracker ? 85 : unknown ? 45 : 65,
         title: e.tracker ? `${app} started talking to a tracker, ${what.slice(8)}` : `${app} reached a new company: ${what}`,
         detail: `${e.ips.size} host${e.ips.size === 1 ? "" : "s"} (${hosts}) · never in the previous ${Math.min(HISTORY_DAYS, Math.round(days))} days`,
@@ -219,6 +222,7 @@ export class FindingsDb {
         if (p.orgs.has(org)) continue;
         out.push({
           key: `new-third-party:${site}:${org}`, kind: "new-third-party", entity: site, ts: e.first,
+          block: e.tracker ? baseDomain([...e.hosts][0]!) : undefined,
           score: e.tracker ? 75 : 55,
           title: `${site} now pulls in ${org}${e.tracker ? " (tracker)" : ""}`,
           detail: `${[...e.hosts].slice(0, 3).join(", ")} · not in its ${p.loads} earlier load${p.loads === 1 ? "" : "s"}`,

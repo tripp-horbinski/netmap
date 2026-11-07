@@ -1,5 +1,6 @@
 mod analytics;
 mod apps;
+mod block;
 mod db;
 mod output;
 mod record;
@@ -55,6 +56,11 @@ enum Cmd {
         #[arg(long, default_values_t = ["1.1.1.1".to_string(), "9.9.9.9".to_string()])]
         upstream: Vec<String>,
     },
+    /// Refuse lookups: manage the resolver's block list (`netlog block` lists it)
+    Block {
+        #[command(subcommand)]
+        cmd: Option<BlockCmd>,
+    },
     /// Give a LAN device a name for reports (by IP or MAC)
     Name {
         device: String,
@@ -106,6 +112,43 @@ enum Cmd {
     Guide,
 }
 
+#[derive(Subcommand)]
+enum BlockCmd {
+    /// Block a domain and everything under it; "@trackers" means the built-in tracker list
+    Add {
+        pattern: String,
+        /// Only for this device (client IP); default: every device
+        #[arg(long, default_value = block::ALL)]
+        device: String,
+        #[arg(long)]
+        note: Option<String>,
+    },
+    /// Stop blocking a pattern
+    Remove {
+        pattern: String,
+        #[arg(long, default_value = block::ALL)]
+        device: String,
+    },
+    /// Import a hosts-format or one-domain-per-line list from a URL or file (replaces that source)
+    Import {
+        from: String,
+        /// Name to file the rules under, so they can be replaced or cleared together
+        #[arg(long, default_value = "list")]
+        source: String,
+    },
+    /// Remove every rule from a source (e.g. the imported list)
+    Clear {
+        source: String,
+    },
+    /// Lookups the resolver refused
+    Refused {
+        #[arg(long, default_value = "24h")]
+        since: String,
+        #[arg(long, default_value_t = 50)]
+        limit: usize,
+    },
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     let data_dir = PathBuf::from(DEFAULT_DATA_DIR);
@@ -124,6 +167,30 @@ fn main() -> Result<()> {
             analytics::report(&conn, &name, &since, app.as_deref(), device.as_deref(), limit)?.print(fmt)
         }
         Cmd::Resolve { listen, upstream } => resolve::run(&db_path, resolve::Options { listen, upstreams: upstream })?,
+        Cmd::Block { cmd } => {
+            let conn = db::open(&db_path, false)?;
+            match cmd {
+                None => run_sql(&conn, "SELECT pattern, device, source, note, datetime(created, 'unixepoch', 'localtime') AS since FROM blocks ORDER BY source, pattern", &[], 10_000)?.print(fmt),
+                Some(BlockCmd::Add { pattern, device, note }) => {
+                    block::add(&conn, &pattern, &device, "user", note.as_deref())?;
+                    println!("blocking {pattern} for {}", if device == block::ALL { "every device".to_string() } else { device });
+                }
+                Some(BlockCmd::Remove { pattern, device }) => {
+                    let n = block::remove(&conn, &pattern, &device)?;
+                    println!("{}", if n > 0 { "removed" } else { "no such rule" });
+                }
+                Some(BlockCmd::Import { from, source }) => {
+                    let n = block::import(&conn, &from, &source)?;
+                    println!("imported {n} domains as source {source:?}; the resolver picks them up within 5 s");
+                }
+                Some(BlockCmd::Clear { source }) => println!("removed {} rules", block::clear_source(&conn, &source)?),
+                Some(BlockCmd::Refused { since, limit }) => run_sql(
+                    &conn,
+                    "SELECT device, qname, blocked AS rule, COUNT(*) AS n, datetime(MAX(ts), 'unixepoch', 'localtime') AS last
+                     FROM lookups WHERE blocked IS NOT NULL AND ts >= since(:since) GROUP BY device, qname, blocked ORDER BY n DESC",
+                    &[(":since", &since)], limit)?.print(fmt),
+            }
+        }
         Cmd::Name { device, label } => {
             let conn = db::open(&db_path, false)?;
             let n = conn.execute("UPDATE devices SET label = ?1 WHERE ip = ?2 OR mac = lower(?2)", (&label, &device))?;

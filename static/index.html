@@ -225,9 +225,10 @@ function renderFindings() {
   $('findings').innerHTML = r.findings.map((f) => `
     <div class="finding ${sev(f.score)}"><i title="score ${f.score}"></i>
       <div><div class="t">${esc(f.title)}</div><div class="d">${esc(f.detail)}${f.links.map((l) => ` <a href="${esc(l.href)}">${esc(l.label)} →</a>`).join('')}</div></div>
-      <div class="act"><span class="when">${ago(f.ts)}</span>${f.kind === 'health' ? '' : `<button class="btn small" data-expect="${esc(f.key)}" data-title="${esc(f.title)}" title="This is normal here: stop reporting it and count it as baseline">Expect</button>`}</div>
+      <div class="act"><span class="when">${ago(f.ts)}</span>${f.block ? nm.blockButton(f.block, { label: 'Block' }) : ''}${f.kind === 'health' ? '' : `<button class="btn small" data-expect="${esc(f.key)}" data-title="${esc(f.title)}" title="This is normal here: stop reporting it and count it as baseline">Expect</button>`}</div>
     </div>`).join('');
   for (const b of $('findings').querySelectorAll('[data-expect]')) b.onclick = () => expectFinding(b.dataset.expect, b.dataset.title, true);
+  nm.wireBlockButtons($('findings'), renderFindings);
   const base = r.baseline;
   const merged = new Map(); // raw helpers alias to one product: sum their shares
   for (const a of base.top_apps) { const n = nm.appName(a.app); merged.set(n, (merged.get(n) ?? 0) + a.share); }
@@ -253,6 +254,7 @@ async function pollSlow() {
     optional(`/api/devices?${q}`), optional(`/api/sites?${q}`),
     p ? optional(`/api/devices?since=${p}`) : null, p ? optional(`/api/sites?since=${p}`) : null,
     optional(`/api/findings?${q}`),
+    nm.loadBlocks(),
   ]);
   render(); renderFindings();
 }

@@ -18,6 +18,7 @@ import { BrowserDb } from "./browser";
 import { FindingsDb } from "./findings";
 import { CompaniesDb } from "./companies";
 import { AppReportDb } from "./appreport";
+import { BlocksDb } from "./blocks";
 import { appName as productName } from "./appname";
 import { classifyHost } from "./classify";
 import type { Load } from "./sites";
@@ -75,6 +76,7 @@ const sites = new SitesDb(db.db, browser);
 const findings = new FindingsDb(db.db, sites);
 const companies = new CompaniesDb(db.db, geo, sites);
 const reports = new AppReportDb(db.db);
+const blocks = new BlocksDb(db.db);
 const home = await findHome(args.home, geo);
 const tracer = new Tracer(db.db, geo);
 
@@ -298,6 +300,24 @@ const server = Bun.serve({
     },
     "/api/browser/status": { GET: () => json(browser.status()) },
     "/api/findings": { GET: withWindow((w) => findings.report(w)) },
+    "/api/blocks": {
+      GET: () => json(blocks.list()),
+      POST: async (req) => {
+        const body = (await req.json().catch(() => null)) as { pattern?: unknown; device?: unknown; note?: unknown } | null;
+        if (!body || typeof body.pattern !== "string") return json({ error: "expected {pattern: string, device?: string, note?: string}" }, 400);
+        try {
+          return json(blocks.add(body.pattern, typeof body.device === "string" ? body.device : "*", typeof body.note === "string" ? body.note : null));
+        } catch (e) {
+          return json({ error: String(e instanceof Error ? e.message : e) }, 400);
+        }
+      },
+      DELETE: async (req) => {
+        const body = (await req.json().catch(() => null)) as { pattern?: unknown; device?: unknown } | null;
+        if (!body || typeof body.pattern !== "string") return json({ error: "expected {pattern: string, device?: string}" }, 400);
+        return json(blocks.remove(body.pattern, typeof body.device === "string" ? body.device : "*"));
+      },
+    },
+    "/api/blocks/refused": { GET: withWindow((w) => blocks.refused(w)) },
     "/api/findings/expect": {
       POST: async (req) => {
         const body = (await req.json().catch(() => null)) as { key?: unknown; title?: unknown; expected?: unknown } | null;

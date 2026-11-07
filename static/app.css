@@ -288,6 +288,12 @@ svg.spark rect.now { fill: var(--text); }
 .cols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; max-width: 900px; }
 @media (max-width: 900px) { .cols { grid-template-columns: 1fr; } }
 
+/* ---- block buttons ---------------------------------------------------------------------- */
+.btn.blk { color: var(--dim); }
+.btn.blk:hover { border-color: var(--warn); color: var(--warn); }
+.btn.blk.on { background: var(--warn-soft); border-color: var(--warn); color: var(--warn); }
+.refused { color: var(--warn); }
+
 /* ---- app report cards ------------------------------------------------------------------- */
 :root { --cls-first: var(--accent); --cls-update: #6250d6; --cls-telemetry: #eda100; --cls-ads: #e34948; --cls-cdn: #898781; --cls-other: #c3c2b7; }
 .segbar { display: flex; height: 8px; gap: 2px; border-radius: 4px; overflow: hidden; }

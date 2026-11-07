@@ -183,6 +183,41 @@ window.nm = (() => {
   /** Sequential fill for a country with n of max: the land color stepped toward the accent, one hue. */
   const choroFill = (n, max) => (n ? mix(token('--map-land'), token('--accent'), 0.15 + 0.7 * Math.sqrt(n / max)) : token('--map-land'));
 
+  // ---- block list (the resolver refuses these; see /api/blocks) -------------------------------
+  const blocks = { rules: [], loaded: false };
+  async function loadBlocks() {
+    try { blocks.rules = await (await fetch('/api/blocks')).json(); blocks.loaded = true; } catch {}
+    return blocks.rules;
+  }
+  const blockedBy = (name, device = '*') => {
+    const n = String(name).toLowerCase().replace(/\.$/, '');
+    for (const r of blocks.rules) {
+      if (r.device !== '*' && r.device !== device) continue;
+      if (r.pattern === '@trackers') continue;
+      if (n === r.pattern || n.endsWith('.' + r.pattern)) return r;
+    }
+    return null;
+  };
+  /** A small Block / Blocked toggle for a domain; `onChange` runs after the rule list changes. */
+  function blockButton(pattern, { device = '*', label = null } = {}) {
+    const hit = blockedBy(pattern, device);
+    const p = esc(String(pattern).toLowerCase());
+    return hit
+      ? `<button class="btn small blk on" data-block="${esc(hit.pattern)}" data-device="${esc(hit.device)}" data-on="1" title="Blocked by rule ${esc(hit.pattern)} for ${hit.device === '*' ? 'every device' : esc(hit.device)} · click to allow again">blocked</button>`
+      : `<button class="btn small blk" data-block="${p}" data-device="${esc(device)}" title="Refuse DNS lookups for ${p} and everything under it${device === '*' ? ', on every device' : ' on this device'}">${label ?? 'block'}</button>`;
+  }
+  function wireBlockButtons(root, onChange) {
+    for (const b of root.querySelectorAll('button.blk')) {
+      b.onclick = async (e) => {
+        e.stopPropagation();
+        const on = b.dataset.on === '1';
+        await fetch('/api/blocks', { method: on ? 'DELETE' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pattern: b.dataset.block, device: b.dataset.device }) });
+        await loadBlocks();
+        onChange?.();
+      };
+    }
+  }
+
   // ---- marks ---------------------------------------------------------------------------
   /** Bar sparkline over equal time bins; last bin (now) in the text ink. One <title> per bar. */
   function spark(bins, win, { cls = '', label = 'lookups' } = {}) {
@@ -250,5 +285,5 @@ window.nm = (() => {
   }
   const WINDOW_SECONDS = { '1h': 3600, '24h': 86400, '7d': 604800, all: Infinity };
 
-  return { esc, fmtN, compact, ago, when, ms, nav, stream, live, perMinute, spark, binTimes, rows, bars, segment, color, token, isDark, WINDOW_SECONDS, countryKey, mix, choroFill, stackedSpark, delta, appName, appInfo, appIcon, aliasConnections, groupByVia, majorityVia };
+  return { esc, fmtN, compact, ago, when, ms, nav, stream, live, perMinute, spark, binTimes, rows, bars, segment, color, token, isDark, WINDOW_SECONDS, countryKey, mix, choroFill, stackedSpark, delta, appName, appInfo, appIcon, aliasConnections, groupByVia, majorityVia, blocks, loadBlocks, blockedBy, blockButton, wireBlockButtons };
 })();

@@ -15,8 +15,10 @@ use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use crate::block::{self, Rules};
 use crate::db;
 use crate::sniff::{be16, read_name};
+use std::sync::RwLock;
 
 pub struct Options {
     pub listen: String,
@@ -37,6 +39,8 @@ struct Lookup {
     answers: Vec<IpAddr>,
     cached: bool,
     ms: f64,
+    /// The block pattern that refused it, if it was refused.
+    blocked: Option<String>,
 }
 
 /// What we need from a DNS message: question, answer IPs, and the cache lifetime.
@@ -118,6 +122,8 @@ struct Resolver {
     local_ips: Arc<Mutex<HashSet<IpAddr>>>,
     cache: Mutex<Cache>,
     log: Sender<Lookup>,
+    /// Block rules, reloaded from the database every few seconds.
+    rules: Arc<RwLock<Rules>>,
 }
 
 impl Resolver {
@@ -132,6 +138,14 @@ impl Resolver {
         let id = &query[..2.min(query.len())];
         let q = parse(query)?;
         let key = (q.qname.clone(), q.qtype);
+
+        // Blocked for this device (or everyone): NXDOMAIN, logged with the rule that fired.
+        let device = client.map_or_else(|| LOCAL.to_string(), |c| c.to_string());
+        if let Some(pat) = self.rules.read().unwrap().matches(&q.qname, &device) {
+            let resp = block::refusal(query)?;
+            self.record_blocked(client, &q, pat, start);
+            return Some(resp);
+        }
 
         if let Some(mut resp) = self.cache.lock().unwrap().get(&key) {
             resp[..2].copy_from_slice(id);
@@ -184,7 +198,25 @@ impl Resolver {
             answers,
             cached,
             ms: start.elapsed().as_secs_f64() * 1000.0,
+            blocked: None,
         });
+    }
+
+    fn record_blocked(&self, client: Option<IpAddr>, q: &Parsed, pattern: String, start: Instant) {
+        let _ = self.log.send(Lookup {
+            ts: db::now(), client, qname: q.qname.clone(), qtype: q.qtype, rcode: 3, answers: Vec::new(), cached: false,
+            ms: start.elapsed().as_secs_f64() * 1000.0, blocked: Some(pattern),
+        });
+    }
+}
+
+/// Every 5 s: pick up block-list changes made by the CLI or the viewer.
+fn rules_watcher(conn: Connection, rules: Arc<RwLock<Rules>>) {
+    loop {
+        std::thread::sleep(Duration::from_secs(5));
+        if let Ok(r) = Rules::load(&conn) {
+            *rules.write().unwrap() = r;
+        }
     }
 }
 
@@ -206,9 +238,9 @@ fn write_batch(conn: &Connection, batch: &[Lookup]) -> Result<()> {
         let client = l.client.map_or_else(|| LOCAL.to_string(), |c| c.to_string());
         let answers = l.answers.iter().map(|a| a.to_string()).collect::<Vec<_>>().join(" ");
         tx.execute(
-            "INSERT INTO dns (ts, client, qname, qtype, rcode, answers, cached, ms)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            (l.ts, &client, &l.qname, l.qtype, l.rcode, answers, l.cached, l.ms),
+            "INSERT INTO dns (ts, client, qname, qtype, rcode, answers, cached, ms, blocked)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            (l.ts, &client, &l.qname, l.qtype, l.rcode, answers, l.cached, l.ms, &l.blocked),
         )?;
         for a in &l.answers {
             tx.execute(
@@ -351,11 +383,19 @@ pub fn run(db_path: &Path, opts: Options) -> Result<()> {
         move || arp_watcher(conn, local_ips)
     });
 
-    let r = Arc::new(Resolver { upstreams, local_ips, cache: Mutex::new(Cache { entries: HashMap::new() }), log: log_tx });
+    let rules = Arc::new(RwLock::new(Rules::load(&db::open(db_path, false)?)?));
+    std::thread::spawn({
+        let conn = db::open(db_path, false)?;
+        let rules = rules.clone();
+        move || rules_watcher(conn, rules)
+    });
+    let blocking = if rules.read().unwrap().is_empty() { String::new() } else { " · block list active".to_string() };
+    let r = Arc::new(Resolver { upstreams, local_ips, cache: Mutex::new(Cache { entries: HashMap::new() }), log: log_tx, rules });
     eprintln!(
-        "netlog resolve: listening on {} (UDP+TCP), forwarding to {} — set the router's DNS to this machine",
+        "netlog resolve: listening on {} (UDP+TCP), forwarding to {}{} — set the router's DNS to this machine",
         opts.listen,
-        opts.upstreams.join(", ")
+        opts.upstreams.join(", "),
+        blocking
     );
     std::thread::spawn({
         let r = r.clone();

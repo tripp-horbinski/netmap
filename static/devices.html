@@ -40,7 +40,7 @@
 <script>
 const { esc, fmtN, ago, when, spark, rows } = nm;
 const $ = (id) => document.getElementById(id);
-const state = { win: '24h', ip: null, list: null, detail: null };
+const state = { win: '24h', ip: null, list: null, detail: null, refused: [] };
 nm.nav('/devices');
 nm.stream();
 
@@ -96,9 +96,17 @@ function renderDetail() {
     <div class="chart">${spark(dev.bins, win)}<div class="axis"><span>${when(win.start)}</span><span>now</span></div></div>
     <h2>By weekday and hour <span class="muted">local time, this window</span></h2>
     ${heatmap(d.heat)}
+    <h2>Blocking <span class="muted">the resolver refuses these for ${esc(dev.device)}</span></h2>
+    <div class="toolbar" style="margin-bottom:8px">
+      <span>Known trackers: ${nm.blockButton('@trackers', { device: dev.ip, label: 'block for this device' })} ${nm.blockButton('@trackers', { device: '*', label: 'block for every device' })}</span>
+    </div>
+    ${(() => { const mine = state.refused.filter((r) => r.ip === dev.ip); return mine.length
+      ? rows(mine.slice(0, 30), [{ h: 'refused', f: (r) => esc(r.qname) }, { h: 'rule', f: (r) => esc(r.rule) }, { h: 'times', n: true, f: (r) => fmtN(r.n) }, { h: 'last', n: true, f: (r) => ago(r.last) }], '')
+      : '<div class="muted">Nothing refused in this window.</div>'; })()}
     <h2>Domains</h2>
     ${rows(d.domains.slice(0, 60), [
       { h: 'domain', f: (r) => esc(r.domain) + tracker(r) },
+      { h: '', f: (r) => nm.blockButton(r.domain, { device: dev.ip }) },
       { h: 'hosts', n: true, f: (r) => fmtN(r.hosts) },
       { h: 'lookups', n: true, f: (r) => fmtN(r.lookups) },
       { h: 'last', n: true, f: (r) => ago(r.last) },
@@ -115,6 +123,7 @@ function renderDetail() {
       { h: 'first', n: true, f: (r) => when(r.first) },
       { h: 'lookups', n: true, f: (r) => fmtN(r.lookups) },
     ], win.since > 0 ? 'Nothing new.' : 'Pick a time window to see what is new.')}`;
+  nm.wireBlockButtons($('main'), renderDetail);
   $('rename').onsubmit = async (e) => {
     e.preventDefault();
     await fetch(`/api/devices/${encodeURIComponent(dev.ip)}/name`, {
@@ -133,11 +142,13 @@ async function select(ip) {
 
 async function refresh() {
   const q = `since=${encodeURIComponent(state.win)}`;
-  const [list, detail] = await Promise.all([
+  const [list, detail, refused] = await Promise.all([
     fetch(`/api/devices?${q}`).then((r) => r.json()),
     state.ip ? fetch(`/api/devices/${encodeURIComponent(state.ip)}?${q}`).then((r) => (r.ok ? r.json() : null)) : null,
+    fetch(`/api/blocks/refused?${q}`).then((r) => (r.ok ? r.json() : [])).catch(() => []),
+    nm.loadBlocks(),
   ]);
-  state.list = list; state.detail = detail;
+  state.list = list; state.detail = detail; state.refused = refused;
   renderList(); renderDetail();
 }
 

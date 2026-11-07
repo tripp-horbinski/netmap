@@ -112,6 +112,27 @@ and how many LAN devices resolved names to its addresses. A stacked bar per comp
 with a table view; click one for the sites, apps, devices and hosts behind each number.
 `GET /api/companies?since=24h`, `GET /api/companies/ORG?since=24h`.
 
+## Blocking (the resolver as a gate)
+
+`netlog resolve` refuses lookups on its block list with NXDOMAIN and logs the refusal with the
+rule that fired (`lookups.blocked`). Rules are a domain (it and everything under it), scoped to one
+device or to every device, kept in the `blocks` table that the CLI and the pages share; the resolver
+picks up changes within 5 s. `@trackers` stands for netlog's built-in tracker list.
+
+```sh
+netlog/target/release/netlog block                      # the rules
+netlog/target/release/netlog block add doubleclick.net   # every device
+netlog/target/release/netlog block add @trackers --device 192.168.1.37
+netlog/target/release/netlog block import https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts --source stevenblack
+netlog/target/release/netlog block refused --since 24h   # what was refused, by device
+```
+
+On the pages, a *block* button sits beside hosts on the app and company pages, beside domains on a
+device's page (scoped to that device), and beside findings about trackers on the overview; the
+device page also lists what was refused and has one-click tracker blocking per device or for all.
+`GET/POST/DELETE /api/blocks`, `GET /api/blocks/refused?since=24h`. Only devices that use this Mac
+as their DNS are affected, and a device with its own DoH walks past it.
+
 ## Naming every connection's process (pktap, root)
 
 `lsof` polling only sees connections that live longer than the poll and only processes running

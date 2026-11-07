@@ -117,7 +117,9 @@ function renderDetail() {
     ${rows(d.host_list.slice(0, 80), [
       { h: 'host', f: (r) => esc(r.host) + (r.tracker ? '<span class="tag">tracker</span>' : '') },
       { h: 'seen via', f: (r) => via(r.via) },
+      { h: '', f: (r) => nm.blockButton(r.host) },
     ], 'None.')}`;
+  nm.wireBlockButtons($('main'), renderDetail);
   $('back').onclick = () => { state.org = null; history.replaceState(null, '', ' '); refresh(); };
 }
 
@@ -132,6 +134,7 @@ async function refresh() {
   const [list, detail] = await Promise.all([
     fetch(`/api/companies?${q}`).then((r) => r.json()),
     state.org ? fetch(`/api/companies/${encodeURIComponent(state.org)}?${q}`).then((r) => (r.ok ? r.json() : null)) : null,
+    nm.loadBlocks(),
   ]);
   state.list = list; state.detail = detail;
   renderList(); renderDetail();

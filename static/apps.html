@@ -151,7 +151,9 @@ function renderCard() {
       { h: 'host', f: (r) => esc(r.host) }, { h: 'for', f: (r) => clsTag(r.cls) },
       { h: 'company', f: (r) => esc(r.org ?? '') }, { h: 'country', f: (r) => esc(r.country ?? '') },
       { h: 'opens', n: true, f: (r) => fmtN(r.opens) }, { h: 'last', n: true, f: (r) => ago(r.last) },
+      { h: '', f: (r) => nm.blockButton(r.host) },
     ], 'None.')}`;
+  nm.wireBlockButtons($('main'), renderCard);
   $('back').onclick = () => { state.name = null; history.replaceState(null, '', ' '); refresh(); };
 }
 
@@ -166,6 +168,7 @@ async function refresh() {
   const [list, card] = await Promise.all([
     fetch(`/api/apps/report?${q}`).then((r) => r.json()),
     state.name ? fetch(`/api/apps/report/${encodeURIComponent(state.name)}?${q}`).then((r) => (r.ok ? r.json() : null)) : null,
+    nm.loadBlocks(),
   ]);
   state.list = list; state.card = card;
   renderList(); renderCard();
